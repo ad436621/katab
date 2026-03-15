@@ -2,8 +2,27 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { lettersTable, questionsTable, repliesTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
+import { safeDecrypt } from "../crypto.js";
+import * as bcrypt from "bcryptjs";
 
 const router = Router();
+
+// Rate limit unlock attempts per token
+const unlockAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_UNLOCK = 10;
+const WINDOW_MS = 30 * 60 * 1000;
+
+function checkUnlockLimit(token: string): boolean {
+  const now = Date.now();
+  const record = unlockAttempts.get(token);
+  if (!record || now > record.resetAt) {
+    unlockAttempts.set(token, { count: 1, resetAt: now + WINDOW_MS });
+    return true; // allowed
+  }
+  if (record.count >= MAX_UNLOCK) return false;
+  record.count++;
+  return true;
+}
 
 router.get("/:token", async (req, res) => {
   try {
@@ -31,13 +50,13 @@ router.get("/:token", async (req, res) => {
       .orderBy(questionsTable.orderIndex);
 
     return res.json({
-      title: letter.title,
-      recipientName: letter.recipientName,
+      title: safeDecrypt(letter.title),
+      recipientName: safeDecrypt(letter.recipientName),
       language: letter.language,
       status: letter.status,
       questions: questions.map(q => ({
         id: q.id,
-        questionText: q.questionText,
+        questionText: safeDecrypt(q.questionText),
         orderIndex: q.orderIndex,
       })),
     });
@@ -51,6 +70,10 @@ router.post("/:token/unlock", async (req, res) => {
   try {
     const { token } = req.params;
     const { answers } = req.body;
+
+    if (!checkUnlockLimit(token)) {
+      return res.status(429).json({ error: "too_many_attempts", message: "محاولات كثيرة، انتظر قليلاً" });
+    }
 
     if (!answers || !Array.isArray(answers)) {
       return res.status(400).json({ error: "missing_answers", message: "الإجابات مطلوبة" });
@@ -83,8 +106,18 @@ router.post("/:token/unlock", async (req, res) => {
         if (!userAnswer) {
           return res.status(403).json({ error: "wrong_answers", message: "إجابة خاطئة أو ناقصة" });
         }
-        const normalizedAnswer = userAnswer.answer?.toLowerCase().trim();
-        if (normalizedAnswer !== question.answerText) {
+        const normalizedInput = userAnswer.answer?.toLowerCase().trim() || "";
+        const storedHash = question.answerText;
+
+        // Support both bcrypt hashes (new) and plain text (legacy pre-encryption rows)
+        let match = false;
+        if (storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$")) {
+          match = await bcrypt.compare(normalizedInput, storedHash);
+        } else {
+          match = normalizedInput === storedHash;
+        }
+
+        if (!match) {
           return res.status(403).json({ error: "wrong_answers", message: "إجابة خاطئة، حاول مرة أخرى" });
         }
       }
@@ -100,30 +133,26 @@ router.post("/:token/unlock", async (req, res) => {
     const replies = await db
       .select()
       .from(repliesTable)
-      .where(eq(repliesTable.letterId, letter.id));
+      .where(eq(repliesTable.letterId, letter.id))
+      .orderBy(repliesTable.createdAt);
 
     return res.json({
       letter: {
         id: letter.id,
-        title: letter.title,
-        recipientName: letter.recipientName,
+        title: safeDecrypt(letter.title),
+        recipientName: safeDecrypt(letter.recipientName),
         uniqueToken: letter.uniqueToken,
         isRead: true,
         readAt: new Date().toISOString(),
         language: letter.language,
-        status: letter.status === "read" ? "read" : letter.status,
+        status: "read",
         createdAt: letter.createdAt.toISOString(),
         updatedAt: letter.updatedAt.toISOString(),
-        body: letter.body,
-        questions: questions.map(q => ({
-          id: q.id,
-          questionText: q.questionText,
-          orderIndex: q.orderIndex,
-        })),
+        body: safeDecrypt(letter.body),
         replies: replies.map(r => ({
           id: r.id,
           letterId: r.letterId,
-          replyBody: r.replyBody,
+          replyBody: safeDecrypt(r.replyBody),
           replyFrom: r.replyFrom,
           createdAt: r.createdAt.toISOString(),
         })),

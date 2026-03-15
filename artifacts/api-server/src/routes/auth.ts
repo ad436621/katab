@@ -1,11 +1,44 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import { db } from "@workspace/db";
 import { adminSessionsTable } from "@workspace/db/schema";
 import { eq, lt } from "drizzle-orm";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
+import { hashToken } from "../crypto.js";
 
 const router = Router();
+
+// In-memory rate limiter: { ip -> { count, resetAt } }
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_ATTEMPTS = 5;
+const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkRateLimit(ip: string): { blocked: boolean; remaining: number } {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(ip, { count: 0, resetAt: now + WINDOW_MS });
+    return { blocked: false, remaining: MAX_ATTEMPTS };
+  }
+  if (record.count >= MAX_ATTEMPTS) {
+    return { blocked: true, remaining: 0 };
+  }
+  return { blocked: false, remaining: MAX_ATTEMPTS - record.count };
+}
+
+function recordFailedAttempt(ip: string) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+  } else {
+    record.count++;
+  }
+}
+
+function clearAttempts(ip: string) {
+  loginAttempts.delete(ip);
+}
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
@@ -17,12 +50,24 @@ async function cleanExpiredSessions() {
 
 // Get admin security questions (public)
 router.get("/security-questions", (_req, res) => {
-  const q1 = process.env.SECURITY_Q1 || "ما هو اسم والدتك قبل الزواج؟";
-  const q2 = process.env.SECURITY_Q2 || "ما هو اسم مدرستك الابتدائية؟";
+  const q1 = process.env.SECURITY_Q1 || "";
+  const q2 = process.env.SECURITY_Q2 || "";
+  // Only return questions if they're configured
+  if (!q1 && !q2) return res.json({ q1: null, q2: null });
   return res.json({ q1, q2 });
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", async (req: Request, res: Response) => {
+  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+
+  const { blocked } = checkRateLimit(ip);
+  if (blocked) {
+    return res.status(429).json({
+      error: "too_many_attempts",
+      message: "محاولات كثيرة جداً، انتظر 15 دقيقة وحاول مجدداً",
+    });
+  }
+
   try {
     const { username, password, securityAnswer1, securityAnswer2 } = req.body;
 
@@ -33,7 +78,16 @@ router.post("/login", async (req, res) => {
     const expectedUsername = process.env.ADMIN_USERNAME || "ahmed";
     const passwordHash = process.env.ADMIN_PASSWORD_HASH || "";
 
-    if (username !== expectedUsername) {
+    // Constant-time username comparison
+    const usernameMatch = crypto.timingSafeEqual(
+      Buffer.from(username.padEnd(64)),
+      Buffer.from(expectedUsername.padEnd(64))
+    );
+
+    if (!usernameMatch) {
+      recordFailedAttempt(ip);
+      // Fake delay to prevent timing attacks
+      await bcrypt.hash("dummy", 10);
       return res.status(401).json({ error: "invalid_credentials", message: "بيانات الدخول غير صحيحة" });
     }
 
@@ -41,49 +95,61 @@ router.post("/login", async (req, res) => {
     if (passwordHash) {
       passwordValid = await bcrypt.compare(password, passwordHash);
     } else {
+      // No hash configured — reject immediately in production, allow in dev
+      if (process.env.NODE_ENV === "production") {
+        return res.status(500).json({ error: "config_error", message: "خطأ في الإعداد" });
+      }
       const devPassword = process.env.ADMIN_PASSWORD || "admin123";
       passwordValid = password === devPassword;
     }
 
     if (!passwordValid) {
+      recordFailedAttempt(ip);
       return res.status(401).json({ error: "invalid_credentials", message: "بيانات الدخول غير صحيحة" });
     }
 
-    // Verify security questions if they are configured
+    // Verify security questions (always required if configured)
     const expectedA1 = process.env.SECURITY_A1;
     const expectedA2 = process.env.SECURITY_A2;
 
     if (expectedA1 || expectedA2) {
       if (!securityAnswer1 || !securityAnswer2) {
-        return res.status(428).json({ 
-          error: "security_questions_required", 
-          message: "يرجى الإجابة على أسئلة الأمان"
+        return res.status(428).json({
+          error: "security_questions_required",
+          message: "يرجى الإجابة على أسئلة الأمان",
         });
       }
 
-      if (expectedA1 && securityAnswer1.toLowerCase().trim() !== expectedA1.toLowerCase().trim()) {
-        return res.status(401).json({ error: "wrong_security_answer", message: "إجابة سؤال الأمان غير صحيحة" });
-      }
+      const a1Match = expectedA1
+        ? securityAnswer1.trim().toLowerCase() === expectedA1.trim().toLowerCase()
+        : true;
+      const a2Match = expectedA2
+        ? securityAnswer2.trim().toLowerCase() === expectedA2.trim().toLowerCase()
+        : true;
 
-      if (expectedA2 && securityAnswer2.toLowerCase().trim() !== expectedA2.toLowerCase().trim()) {
+      if (!a1Match || !a2Match) {
+        recordFailedAttempt(ip);
         return res.status(401).json({ error: "wrong_security_answer", message: "إجابة سؤال الأمان غير صحيحة" });
       }
     }
 
+    // All checks passed — clear rate limit and create session
+    clearAttempts(ip);
     await cleanExpiredSessions();
 
-    const token = generateToken();
+    const rawToken = generateToken();
+    const storedToken = hashToken(rawToken); // Store SHA-256 hash, send raw to client
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     await db.insert(adminSessionsTable).values({
-      sessionToken: token,
+      sessionToken: storedToken,
       expiresAt,
     });
 
-    res.cookie("admin_session", token, {
+    res.cookie("admin_session", rawToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "strict",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: "/",
     });
@@ -97,9 +163,10 @@ router.post("/login", async (req, res) => {
 
 router.post("/logout", async (req, res) => {
   try {
-    const token = req.cookies?.admin_session;
-    if (token) {
-      await db.delete(adminSessionsTable).where(eq(adminSessionsTable.sessionToken, token));
+    const rawToken = req.cookies?.admin_session;
+    if (rawToken) {
+      const storedToken = hashToken(rawToken);
+      await db.delete(adminSessionsTable).where(eq(adminSessionsTable.sessionToken, storedToken));
     }
     res.clearCookie("admin_session", { path: "/" });
     return res.json({ success: true, message: "تم تسجيل الخروج" });
@@ -111,15 +178,16 @@ router.post("/logout", async (req, res) => {
 
 router.get("/me", async (req, res) => {
   try {
-    const token = req.cookies?.admin_session;
-    if (!token) {
+    const rawToken = req.cookies?.admin_session;
+    if (!rawToken) {
       return res.status(401).json({ error: "not_authenticated", message: "غير مصادق" });
     }
 
+    const storedToken = hashToken(rawToken);
     const sessions = await db
       .select()
       .from(adminSessionsTable)
-      .where(eq(adminSessionsTable.sessionToken, token));
+      .where(eq(adminSessionsTable.sessionToken, storedToken));
 
     const session = sessions[0];
 

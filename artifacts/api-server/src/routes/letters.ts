@@ -3,7 +3,9 @@ import { db } from "@workspace/db";
 import { lettersTable, questionsTable, repliesTable } from "@workspace/db/schema";
 import { eq, desc, like, and, SQL } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
+import { encrypt, safeDecrypt } from "../crypto.js";
 import * as crypto from "crypto";
+import * as bcrypt from "bcryptjs";
 
 const router = Router();
 
@@ -14,8 +16,8 @@ function generateToken(): string {
 function formatLetter(letter: any) {
   return {
     id: letter.id,
-    title: letter.title,
-    recipientName: letter.recipientName,
+    title: safeDecrypt(letter.title),
+    recipientName: safeDecrypt(letter.recipientName),
     uniqueToken: letter.uniqueToken,
     isRead: letter.isRead,
     readAt: letter.readAt ? letter.readAt.toISOString() : null,
@@ -26,13 +28,23 @@ function formatLetter(letter: any) {
   };
 }
 
+function formatReply(r: any) {
+  return {
+    id: r.id,
+    letterId: r.letterId,
+    replyBody: safeDecrypt(r.replyBody),
+    replyFrom: r.replyFrom === "__admin__" ? "__admin__" : safeDecrypt(r.replyFrom),
+    isAdmin: r.replyFrom === "__admin__",
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
 router.get("/", requireAdmin, async (req, res) => {
   try {
     const { status, search } = req.query;
 
     const conditions: SQL[] = [];
     if (status) conditions.push(eq(lettersTable.status, status as any));
-    if (search) conditions.push(like(lettersTable.title, `%${search}%`));
 
     const letters = await db
       .select()
@@ -40,10 +52,17 @@ router.get("/", requireAdmin, async (req, res) => {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(lettersTable.createdAt));
 
-    return res.json({
-      letters: letters.map(formatLetter),
-      total: letters.length,
-    });
+    let result = letters.map(formatLetter);
+
+    // Search after decryption
+    if (search) {
+      const q = (search as string).toLowerCase();
+      result = result.filter(l =>
+        l.title.toLowerCase().includes(q) || l.recipientName.toLowerCase().includes(q)
+      );
+    }
+
+    return res.json({ letters: result, total: result.length });
   } catch (err) {
     console.error("List letters error:", err);
     return res.status(500).json({ error: "server_error", message: "خطأ في الخادم" });
@@ -62,9 +81,9 @@ router.post("/", requireAdmin, async (req, res) => {
     const now = new Date();
 
     const [letter] = await db.insert(lettersTable).values({
-      title,
-      body,
-      recipientName,
+      title: encrypt(title),
+      body: encrypt(body),
+      recipientName: encrypt(recipientName),
       uniqueToken,
       language,
       status,
@@ -73,14 +92,15 @@ router.post("/", requireAdmin, async (req, res) => {
     }).returning();
 
     if (questions && questions.length > 0) {
-      await db.insert(questionsTable).values(
-        questions.map((q: any, i: number) => ({
+      const hashed = await Promise.all(
+        questions.map(async (q: any, i: number) => ({
           letterId: letter.id,
-          questionText: q.questionText,
-          answerText: q.answerText.toLowerCase().trim(),
+          questionText: encrypt(q.questionText),
+          answerText: await bcrypt.hash(q.answerText.toLowerCase().trim(), 12),
           orderIndex: q.orderIndex ?? i,
         }))
       );
+      await db.insert(questionsTable).values(hashed);
     }
 
     return res.status(201).json({ letter: formatLetter(letter) });
@@ -117,22 +137,14 @@ router.get("/:id", requireAdmin, async (req, res) => {
     return res.json({
       letter: {
         ...formatLetter(letter),
-        body: letter.body,
-        // Return answers for admin editing
+        body: safeDecrypt(letter.body),
         questions: questions.map(q => ({
           id: q.id,
-          questionText: q.questionText,
-          answerText: q.answerText, // Admin can see answers
+          questionText: safeDecrypt(q.questionText),
+          answerText: "[مشفّر]", // Never expose answer hash to admin UI
           orderIndex: q.orderIndex,
         })),
-        replies: replies.map(r => ({
-          id: r.id,
-          letterId: r.letterId,
-          replyBody: r.replyBody,
-          replyFrom: r.replyFrom,
-          isAdmin: r.replyFrom === "__admin__",
-          createdAt: r.createdAt.toISOString(),
-        })),
+        replies: replies.map(formatReply),
       },
     });
   } catch (err) {
@@ -152,9 +164,9 @@ router.put("/:id", requireAdmin, async (req, res) => {
     }
 
     const updateData: any = { updatedAt: new Date() };
-    if (title !== undefined) updateData.title = title;
-    if (body !== undefined) updateData.body = body;
-    if (recipientName !== undefined) updateData.recipientName = recipientName;
+    if (title !== undefined) updateData.title = encrypt(title);
+    if (body !== undefined) updateData.body = encrypt(body);
+    if (recipientName !== undefined) updateData.recipientName = encrypt(recipientName);
     if (language !== undefined) updateData.language = language;
     if (status !== undefined) updateData.status = status;
 
@@ -167,14 +179,15 @@ router.put("/:id", requireAdmin, async (req, res) => {
     if (questions !== undefined) {
       await db.delete(questionsTable).where(eq(questionsTable.letterId, id));
       if (questions.length > 0) {
-        await db.insert(questionsTable).values(
-          questions.map((q: any, i: number) => ({
+        const hashed = await Promise.all(
+          questions.map(async (q: any, i: number) => ({
             letterId: id,
-            questionText: q.questionText,
-            answerText: q.answerText.toLowerCase().trim(),
+            questionText: encrypt(q.questionText),
+            answerText: await bcrypt.hash(q.answerText.toLowerCase().trim(), 12),
             orderIndex: q.orderIndex ?? i,
           }))
         );
+        await db.insert(questionsTable).values(hashed);
       }
     }
 
@@ -194,6 +207,8 @@ router.delete("/:id", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
     }
 
+    await db.delete(questionsTable).where(eq(questionsTable.letterId, id));
+    await db.delete(repliesTable).where(eq(repliesTable.letterId, id));
     await db.delete(lettersTable).where(eq(lettersTable.id, id));
 
     return res.json({ success: true, message: "تم حذف الرسالة" });
@@ -225,7 +240,6 @@ router.post("/:id/send", requireAdmin, async (req, res) => {
   }
 });
 
-// Admin reply to a letter
 router.post("/:id/admin-reply", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -240,19 +254,19 @@ router.post("/:id/admin-reply", requireAdmin, async (req, res) => {
       return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
     }
 
-    const adminName = process.env.ADMIN_USERNAME || "ahmed";
-
     const [reply] = await db.insert(repliesTable).values({
       letterId: id,
-      replyBody,
+      replyBody: encrypt(replyBody),
       replyFrom: "__admin__",
     }).returning();
+
+    const adminName = process.env.ADMIN_USERNAME || "ahmed";
 
     return res.status(201).json({
       reply: {
         id: reply.id,
         letterId: reply.letterId,
-        replyBody: reply.replyBody,
+        replyBody: replyBody,
         replyFrom: adminName,
         isAdmin: true,
         createdAt: reply.createdAt.toISOString(),

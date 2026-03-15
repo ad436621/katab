@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { lettersTable, questionsTable, repliesTable } from "@workspace/db/schema";
+import { lettersTable, repliesTable } from "@workspace/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
+import { encrypt, safeDecrypt } from "../crypto.js";
 
 const router = Router();
 
@@ -10,8 +11,13 @@ router.post("/", async (req, res) => {
   try {
     const { token, replyBody, replyFrom } = req.body;
 
-    if (!token || !replyBody || !replyFrom) {
+    if (!token || !replyBody?.trim() || !replyFrom?.trim()) {
       return res.status(400).json({ error: "missing_fields", message: "جميع الحقول مطلوبة" });
+    }
+
+    // Limit reply length
+    if (replyBody.length > 5000) {
+      return res.status(400).json({ error: "too_long", message: "الرد طويل جداً" });
     }
 
     const letters = await db
@@ -31,8 +37,8 @@ router.post("/", async (req, res) => {
 
     const [reply] = await db.insert(repliesTable).values({
       letterId: letter.id,
-      replyBody,
-      replyFrom,
+      replyBody: encrypt(replyBody),
+      replyFrom: encrypt(replyFrom),
     }).returning();
 
     await db
@@ -44,8 +50,8 @@ router.post("/", async (req, res) => {
       reply: {
         id: reply.id,
         letterId: reply.letterId,
-        replyBody: reply.replyBody,
-        replyFrom: reply.replyFrom,
+        replyBody: replyBody,
+        replyFrom: replyFrom,
         createdAt: reply.createdAt.toISOString(),
       },
     });
@@ -69,8 +75,8 @@ router.get("/:letterId", requireAdmin, async (req, res) => {
       replies: replies.map(r => ({
         id: r.id,
         letterId: r.letterId,
-        replyBody: r.replyBody,
-        replyFrom: r.replyFrom,
+        replyBody: safeDecrypt(r.replyBody),
+        replyFrom: r.replyFrom === "__admin__" ? "__admin__" : safeDecrypt(r.replyFrom),
         createdAt: r.createdAt.toISOString(),
       })),
     });
