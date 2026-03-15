@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [[artifacts]]
 id = "artifacts/api-server"
@@ -34,3 +34,6 @@ SECURITY_Q2 = "ما هي سنة ميلادها"
 SECURITY_A2 = "1984"
 ENCRYPTION_KEY = "4af11072a2a00bfb2d2bb2b9a1c42ca257c8349bb165f13e83d188547a3863e0"
 ADMIN_PASSWORD_HASH = "$2b$12$hCtGq44wKxiNMhLHN6nBz.viwn/.japQSBOVXLsUaWA.HbqblgNfu"
+
+[nix]
+channel = "stable-25_05"

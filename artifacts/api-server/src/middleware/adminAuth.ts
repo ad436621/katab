@@ -2,18 +2,21 @@ import { Request, Response, NextFunction } from "express";
 import { db } from "@workspace/db";
 import { adminSessionsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
+import { hashToken } from "../crypto.js";
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
-    const token = req.cookies?.admin_session;
-    if (!token) {
+    const rawToken = req.cookies?.admin_session;
+    if (!rawToken) {
       return res.status(401).json({ error: "not_authenticated", message: "يجب تسجيل الدخول" });
     }
+
+    const storedToken = hashToken(rawToken);
 
     const sessions = await db
       .select()
       .from(adminSessionsTable)
-      .where(eq(adminSessionsTable.sessionToken, token));
+      .where(eq(adminSessionsTable.sessionToken, storedToken));
 
     const session = sessions[0];
 
