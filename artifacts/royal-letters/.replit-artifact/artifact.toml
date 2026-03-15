@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "الرسائل الملكية"
+version = "1.0.0"
+id = "artifacts/royal-letters"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 21891
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/royal-letters run dev"
+
+[services.env]
+PORT = "21891"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/royal-letters", "run", "build"]
+publicDir = "artifacts/royal-letters/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"

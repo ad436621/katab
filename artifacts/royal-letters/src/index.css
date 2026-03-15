@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Scheherazade+New:wght@400;700&family=Reem+Kufi:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: 'Cairo', sans-serif;
+  --font-display: 'Reem Kufi', sans-serif;
+  --font-script: 'Scheherazade New', serif;
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+:root {
+  --background: 42 60% 97%;
+  --foreground: 25 60% 15%;
+  --border: 40 55% 65%;
+  --card: 42 55% 97%;
+  --card-foreground: 25 60% 15%;
+  --card-border: 40 45% 75%;
+  --sidebar: 40 50% 94%;
+  --sidebar-foreground: 25 60% 15%;
+  --sidebar-border: 40 45% 75%;
+  --sidebar-primary: 40 65% 50%;
+  --sidebar-primary-foreground: 42 60% 97%;
+  --sidebar-accent: 42 50% 92%;
+  --sidebar-accent-foreground: 25 55% 20%;
+  --sidebar-ring: 40 65% 50%;
+  --popover: 42 55% 97%;
+  --popover-foreground: 25 60% 15%;
+  --popover-border: 40 45% 75%;
+  --primary: 40 65% 50%;
+  --primary-foreground: 42 60% 97%;
+  --secondary: 42 45% 90%;
+  --secondary-foreground: 25 55% 20%;
+  --muted: 40 30% 92%;
+  --muted-foreground: 25 30% 45%;
+  --accent: 40 50% 88%;
+  --accent-foreground: 25 55% 20%;
+  --destructive: 0 72% 35%;
+  --destructive-foreground: 42 60% 97%;
+  --input: 40 45% 78%;
+  --ring: 40 65% 50%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body {
+    @apply font-sans antialiased bg-background text-foreground;
+    direction: rtl;
+    text-align: right;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    @apply font-normal;
+  }
+}
+
+.bg-parchment-pattern {
+  background-image: url('/images/parchment-texture.png');
+  background-repeat: repeat;
+  background-size: 400px;
+}
+
+.royal-shadow {
+  box-shadow: 0 10px 40px -10px rgba(180, 150, 80, 0.25), 0 0 20px rgba(180, 150, 80, 0.1);
+}
+
+.royal-gradient {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(40 60% 40%) 100%);
+}
+
+.text-gradient-gold {
+  background: linear-gradient(to right, #B48B36, #D4AF37, #AA771C);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

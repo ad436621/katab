@@ -1,0 +1,899 @@
+<role>
+You are an elite full-stack engineer at Anthropic. You are building a complete,
+production-ready application on Replit. You write zero-placeholder, zero-TODO,
+fully functional code. You think deeply before writing. You verify everything.
+</role>
+
+<task>
+Build "الرسائل الملكية" — a complete royal Arabic letter platform.
+Ahmed sends personalized, beautifully styled letters to recipients.
+Each letter is locked behind custom security questions and opened via a unique link.
+The entire UI is in Arabic. The theme is light mode — aged parchment, gold, ivory.
+</task>
+
+<replit_environment>
+Replit runs a persistent Node.js server — NOT serverless.
+Use Express.js as the backend framework.
+Use Replit's built-in Secrets tab for environment variables (process.env).
+Use Neon (free PostgreSQL) as the database.
+Use Prisma as the ORM.
+The app runs as a single Express server serving both API routes and static files.
+Replit auto-detects the start command from package.json "start" script.
+</replit_environment>
+
+<environment_variables>
+Set these in Replit Secrets tab (not in code):
+
+DATABASE_URL        = postgresql://...@...neon.tech/neondb?sslmode=require
+DIRECT_URL          = postgresql://...@...neon.tech/neondb?sslmode=require
+ADMIN_USERNAME      = ahmed
+ADMIN_PASSWORD_HASH = (bcrypt hash of password, cost 12)
+SESSION_SECRET      = (random 64-char string)
+SECURITY_Q1         = (first security question in Arabic)
+SECURITY_A1         = (answer to Q1, lowercase)
+SECURITY_Q2         = (second security question in Arabic)
+SECURITY_A2         = (answer to Q2, lowercase)
+PORT                = 3000
+NODE_ENV            = production
+</environment_variables>
+
+<file_structure>
+Produce ALL files in this exact order:
+
+/
+├── package.json
+├── .env.example
+├── .replit                         ← Replit config
+├── replit.nix                      ← Replit nix packages
+├── SETUP.md
+│
+├── prisma/
+│   └── schema.prisma
+│
+├── src/
+│   ├── server.js                   ← Express entry point
+│   ├── db.js                       ← Prisma singleton
+│   ├── middleware/
+│   │   ├── auth.js                 ← session verification
+│   │   └── rateLimiter.js          ← in-memory rate limiter
+│   └── routes/
+│       ├── auth.js                 ← /api/auth/*
+│       ├── letters.js              ← /api/letters/*
+│       ├── questions.js            ← /api/questions/*
+│       ├── replies.js              ← /api/replies/*
+│       └── verify.js               ← /api/verify/*
+│
+└── public/
+    ├── css/
+    │   └── royal.css
+    ├── js/
+    │   ├── api.js
+    │   ├── auth.js
+    │   └── utils.js
+    ├── index.html
+    ├── login.html
+    ├── dashboard.html
+    ├── compose.html
+    ├── letter.html
+    └── reply.html
+</file_structure>
+
+<prisma_schema>
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Letter {
+  id            String    @id @default(cuid())
+  title         String
+  body          String
+  recipientName String
+  uniqueToken   String    @unique
+  isRead        Boolean   @default(false)
+  readAt        DateTime?
+  language      Language  @default(arabic)
+  status        Status    @default(draft)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  questions     Question[]
+  replies       Reply[]
+  @@index([uniqueToken])
+  @@map("letters")
+}
+
+model Question {
+  id           String  @id @default(cuid())
+  letterId     String
+  questionText String
+  answerText   String
+  orderIndex   Int
+  letter       Letter  @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  @@index([letterId, orderIndex])
+  @@map("questions")
+}
+
+model Reply {
+  id        String   @id @default(cuid())
+  letterId  String
+  replyBody String
+  replyFrom String
+  createdAt DateTime @default(now())
+  letter    Letter   @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  @@map("replies")
+}
+
+model AdminSession {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  @@index([sessionToken])
+  @@map("admin_sessions")
+}
+
+enum Language { arabic english }
+enum Status   { draft sent read replied }
+</prisma_schema>
+
+<design_system>
+THEME: Light mode — aged parchment, warm ivory, royal gold, deep ink.
+The entire interface feels like a royal palace document room.
+Every surface is warm and luminous. No dark backgrounds except subtle shadows.
+
+COLOR PALETTE (CSS custom properties):
+/* Gold family */
+--gold-50:  #FFFBEB
+--gold-100: #FEF3C7
+--gold-200: #FDE68A
+--gold-300: #F0D060
+--gold-400: #D4A839
+--gold-500: #C9A84C
+--gold-600: #A07C2A
+--gold-700: #8B6914
+--gold-800: #6B4F0F
+--gold-900: #4A3508
+
+/* Parchment family */
+--parchment-50:  #FDFAF3
+--parchment-100: #F9F3E3
+--parchment-200: #F5E6C8
+--parchment-300: #EDD9A3
+--parchment-400: #E4CB7E
+--parchment-500: #D4B55A
+
+/* Ink family */
+--ink-50:  #FAF7F5
+--ink-100: #F0EAE6
+--ink-200: #D9C9C0
+--ink-600: #5C3D2E
+--ink-700: #3D2214
+--ink-800: #2C1810
+--ink-900: #1A0C06
+
+/* UI colors */
+--bg-page:      #FAF7F0    ← warm ivory page background
+--bg-surface:   #FDF9F0    ← cards and panels
+--bg-elevated:  #FFFCF5    ← modals and overlays
+--border-light: #EDD9A3
+--border-main:  #C9A84C
+--border-dark:  #8B6914
+
+/* Status colors */
+--status-draft:   #6B7280  (gray)
+--status-sent:    #1D4ED8  (blue)
+--status-read:    #C9A84C  (gold)
+--status-replied: #15803D  (green)
+
+/* Semantic */
+--error:   #991B1B
+--success: #15803D
+--info:    #1E40AF
+--warning: #92400E
+
+TYPOGRAPHY:
+/* Load from Google Fonts in every HTML file: */
+@import url('https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=Cinzel+Decorative:wght@400;700&family=Cairo:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+
+Rules:
+- Arabic letter body:    Amiri, 22px, line-height 2.5, var(--ink-900), dir=rtl
+- English letter body:   Cinzel Decorative, 18px, line-height 2.0, var(--ink-800)
+- All UI text (Arabic):  Cairo — this is the PRIMARY UI font for everything
+- Page headings:         Cairo 700, var(--gold-800)
+- Subheadings:           Cairo 600, var(--ink-700)
+- Body UI text:          Cairo 400, var(--ink-700)
+- Muted text:            Cairo 300, var(--ink-600)
+- Numbers/dates:         Cairo 500, var(--gold-700)
+
+SPACING SYSTEM:
+--space-1: 4px   --space-2: 8px   --space-3: 12px
+--space-4: 16px  --space-5: 20px  --space-6: 24px
+--space-8: 32px  --space-10: 40px --space-12: 48px
+--space-16: 64px
+
+BORDER RADIUS:
+--radius-sm: 4px   --radius-md: 8px
+--radius-lg: 16px  --radius-xl: 24px
+--radius-full: 9999px
+
+SHADOWS:
+--shadow-sm:  0 1px 3px rgba(139,105,20,0.08), 0 1px 2px rgba(139,105,20,0.06)
+--shadow-md:  0 4px 12px rgba(139,105,20,0.10), 0 2px 4px rgba(139,105,20,0.08)
+--shadow-lg:  0 10px 30px rgba(139,105,20,0.12), 0 4px 8px rgba(139,105,20,0.08)
+--shadow-gold: 0 0 0 3px rgba(201,168,76,0.25)
+
+COMPONENTS (implement fully in royal.css):
+
+.royal-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-8);
+}
+
+.royal-card-elevated {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.parchment-paper {
+  background: var(--parchment-50);
+  background-image:
+    radial-gradient(ellipse at 15% 25%, rgba(201,168,76,0.06) 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 75%, rgba(139,105,20,0.05) 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%, rgba(253,250,243,0.8) 0%, transparent 70%);
+  border: 1px solid var(--border-light);
+}
+
+.gold-btn {
+  background: linear-gradient(135deg, var(--gold-300) 0%, var(--gold-500) 50%, var(--gold-700) 100%);
+  background-size: 200% 200%;
+  background-position: 0% 50%;
+  color: var(--parchment-50);
+  font-family: 'Cairo', sans-serif;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-6);
+  cursor: pointer;
+  transition: background-position 0.4s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.gold-btn:hover {
+  background-position: 100% 50%;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-gold);
+}
+.gold-btn:active { transform: translateY(0); }
+
+.ghost-btn {
+  background: transparent;
+  border: 1px solid var(--border-main);
+  color: var(--gold-700);
+  font-family: 'Cairo', sans-serif;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-6);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.ghost-btn:hover { background: var(--gold-50); }
+
+.danger-btn {
+  background: var(--error);
+  color: white;
+  font-family: 'Cairo', sans-serif;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-6);
+  cursor: pointer;
+}
+
+.royal-input {
+  width: 100%;
+  background: var(--parchment-50);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-family: 'Cairo', sans-serif;
+  font-size: 15px;
+  color: var(--ink-800);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+  box-sizing: border-box;
+}
+.royal-input:focus {
+  border-color: var(--gold-500);
+  box-shadow: var(--shadow-gold);
+}
+.royal-input.error {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(153,27,27,0.15);
+}
+.royal-input.success {
+  border-color: var(--success);
+  box-shadow: 0 0 0 3px rgba(21,128,61,0.15);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  font-family: 'Cairo', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+}
+.badge-draft   { background:#F3F4F6; color:#374151; }
+.badge-sent    { background:#DBEAFE; color:#1E40AF; }
+.badge-read    { background:#FEF3C7; color:#92400E; }
+.badge-replied { background:#DCFCE7; color:#166534; }
+
+.royal-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(26,12,6,0.5);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.royal-modal-overlay.open {
+  opacity: 1; pointer-events: all;
+}
+.royal-modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-10);
+  max-width: 480px; width: 90%;
+  transform: scale(0.95) translateY(8px);
+  transition: transform 0.25s ease;
+}
+.royal-modal-overlay.open .royal-modal {
+  transform: scale(1) translateY(0);
+}
+
+.toast {
+  position: fixed;
+  bottom: var(--space-8); left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--ink-800);
+  color: var(--parchment-100);
+  font-family: 'Cairo', sans-serif;
+  font-size: 14px;
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-lg);
+  z-index: 2000;
+  transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+  white-space: nowrap;
+}
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+}
+
+.royal-loader {
+  display: inline-block;
+  width: 40px; height: 40px;
+  border: 3px solid var(--gold-200);
+  border-top-color: var(--gold-500);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.wax-seal {
+  width: 64px; height: 64px;
+  background: radial-gradient(circle at 35% 35%, #C0392B, #7B241C);
+  border: 3px solid var(--gold-500);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--shadow-md), inset 0 2px 4px rgba(0,0,0,0.2);
+}
+.wax-seal span {
+  font-family: 'Cinzel Decorative', cursive;
+  color: var(--gold-200);
+  font-size: 22px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+/* Arabesque SVG ornament — use inline in HTML */
+/* <svg class="ornament" ...> defined per page */
+
+/* Floating particles — index page only */
+@keyframes float-particle {
+  0%   { transform: translateY(0)   rotate(0deg);   opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.4; }
+  100% { transform: translateY(-100vh) rotate(720deg); opacity: 0; }
+}
+.particle {
+  position: fixed;
+  width: 6px; height: 6px;
+  background: var(--gold-300);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: float-particle linear infinite;
+}
+
+/* Shake animation */
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  15%     { transform: translateX(-8px); }
+  30%     { transform: translateX(8px); }
+  45%     { transform: translateX(-6px); }
+  60%     { transform: translateX(6px); }
+  75%     { transform: translateX(-4px); }
+  90%     { transform: translateX(4px); }
+}
+.shake { animation: shake 0.5s ease; }
+
+/* Checkmark reveal */
+@keyframes check-pop {
+  0%   { transform: scale(0) rotate(-15deg); opacity: 0; }
+  60%  { transform: scale(1.2) rotate(5deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.check-pop { animation: check-pop 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
+/* Letter parchment unroll */
+@keyframes unroll {
+  from { transform: scaleY(0); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+.unroll {
+  transform-origin: top center;
+  animation: unroll 1.2s cubic-bezier(0.34,1.56,0.64,1) forwards;
+}
+
+/* Counter animation */
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+</design_system>
+
+<extra_features>
+Implement ALL of the following features in addition to the core system:
+
+1. LETTER TEMPLATES
+   - Ahmed can choose from 3 pre-built templates when composing:
+     • "رسالة حب رسمية" — romantic formal
+     • "رسالة عتاب" — gentle reproach
+     • "رسالة شوق" — longing/missing
+   - Each template pre-fills the body textarea with a sample royal Arabic text
+   - Template picker shown as 3 clickable cards above the editor
+
+2. LETTER EMOJI / MOOD STAMP
+   - Before sending, Ahmed picks a "mood stamp" for the letter:
+     ♛ فخر  |  ♡ حب  |  ✦ شوق  |  ⚔ جدية  |  ✿ بهجة
+   - Chosen stamp appears as a decorative gold element at the top of the letter
+   - Stored in letter record (add moodStamp field to Prisma schema: String?)
+
+3. READ RECEIPT NOTIFICATION BADGE
+   - Dashboard header shows a live badge: "📬 رسائل جديدة مقروءة: N"
+   - Polled every 30 seconds via GET /api/letters/unread-since
+   - Badge animates (pulse) when count > 0
+   - Clicking badge scrolls to the relevant letters in the table
+   - Badge disappears when Ahmed views those letters
+
+4. REPLY THREAD VIEW
+   - In dashboard, clicking a letter opens a full slide-in panel (right side, 480px wide)
+   - Panel shows the complete letter AND all replies in chronological order
+   - Ahmed can send a reply FROM the dashboard panel (textarea + send button)
+   - This reply is stored as a new Reply record with replyFrom = "أحمد"
+   - Recipient sees Ahmed's reply below their letter on letter.html
+
+5. LETTER EXPIRY
+   - Ahmed can set an optional expiry date when composing
+   - Add expiresAt field to Prisma schema: DateTime?
+   - On letter.html: if current date > expiresAt → show "انتهت صلاحية هذه الرسالة"
+     instead of the question gate (no letter revealed)
+   - Dashboard shows expiry date in table with red badge if expired
+
+6. COPY-LINK WITH QR CODE
+   - On dashboard, "نسخ الرابط" button also generates a QR code
+   - QR code rendered via qrcode npm package (server-side) or qrcode.js (client-side CDN)
+   - QR shown in a small modal: "امسح الرمز لفتح رسالتك"
+   - User can download the QR as PNG
+
+7. LETTER STATISTICS PAGE
+   - New page: /stats.html (protected, admin only)
+   - Shows:
+     • Total letters by status (donut chart using pure CSS — no Chart.js)
+     • Letters sent per month (bar chart, CSS only)
+     • Average time to read (in hours)
+     • Most active recipient (most letters received)
+   - All data from GET /api/stats
+
+8. SEARCH & FILTER
+   - Dashboard search bar: searches by recipient name OR letter title
+   - Filter by date range (from/to date pickers)
+   - Filter by language (Arabic / English / All)
+   - All filters work client-side (no new API calls) on the cached letters array
+
+9. PRINT / EXPORT LETTER AS PDF
+   - On letter.html (after reveal), "طباعة الرسالة" button
+   - Uses window.print() with a custom @media print stylesheet
+   - Print view: white background, letter centered, no UI chrome, Amiri font preserved
+   - Print stylesheet hides: buttons, question gate, header, footer
+
+10. LETTER PREVIEW SHARE IMAGE
+    - On compose.html, "معاينة الرسالة" generates a preview card
+    - Shows recipient name, title, mood stamp, and first 100 chars
+    - Styled as a royal card (CSS only, no canvas)
+    - "نسخ المعاينة" copies the letter URL to clipboard
+
+11. KEYBOARD SHORTCUTS
+    - On dashboard: N = New Letter, / = Focus search, Esc = Close panel
+    - On compose: Ctrl+S = Save Draft, Ctrl+Enter = Send Letter
+    - On letter.html: Enter = Submit current answer
+    - Small keyboard shortcut hint shown on hover of each button
+
+12. EMPTY STATES (illustrated, CSS only)
+    - No letters: large CSS arabesque illustration + gold text
+    - No replies: ink quill illustration (CSS shapes)
+    - Letter not found (404): broken wax seal animation (CSS)
+    - Session expired: hourglass illustration with sand falling (CSS animation)
+
+13. LAST SEEN INDICATOR
+    - On dashboard table: show "آخر دخول: منذ X دقيقة" for each letter that was read
+    - Calculated from readAt field
+    - Color-coded: green = < 1 hour, amber = 1-24 hours, gray = > 24 hours
+
+14. DARK GOLD HEADER VARIANT FOR ADMIN PAGES
+    - dashboard.html, compose.html, stats.html share a royal header component
+    - Header: ivory/cream background, gold border bottom, logo + nav + user greeting
+    - "مرحباً يا أحمد ✦" shown in gold in the header
+    - Active page highlighted with gold underline in nav
+
+15. MOBILE GESTURES
+    - On letter.html mobile: swipe up to submit answer
+    - On dashboard mobile: swipe left on a table row to reveal action buttons
+    - On compose mobile: sticky bottom action bar (Save / Send) instead of inline buttons
+</extra_features>
+
+<backend_routes>
+Express server (src/server.js):
+- Serve static files from /public
+- Mount API routes at /api
+- Handle SPA fallback: all non-API routes serve the appropriate HTML file
+- Body parser: express.json(), express.urlencoded()
+- CORS: allow same origin only
+- Helmet.js for security headers
+- morgan for request logging in development
+
+Route files (src/routes/):
+
+auth.js:
+  POST /api/auth/login
+  POST /api/auth/logout
+  GET  /api/auth/questions     ← returns Q1 and Q2 text (never answers)
+
+letters.js:
+  GET    /api/letters                  ← admin, list all with counts
+  POST   /api/letters                  ← admin, create with questions
+  GET    /api/letters/:id              ← admin, single letter
+  PATCH  /api/letters/:id              ← admin, update (if not read)
+  DELETE /api/letters/:id              ← admin, delete (cascade)
+  GET    /api/letters/token/:token     ← public, fetch by token (no answers)
+  PATCH  /api/letters/token/:token/read ← public, mark as read
+  GET    /api/letters/unread-since     ← admin, count newly read letters
+
+questions.js:
+  GET  /api/questions/:letterId        ← admin only
+  POST /api/questions/:letterId        ← admin only (replace all)
+
+replies.js:
+  GET  /api/replies/:letterId          ← admin only
+  POST /api/replies/:letterId          ← public (recipient submits)
+
+verify.js:
+  POST /api/verify/answer              ← public, check one answer
+
+stats.js:
+  GET /api/stats                       ← admin only, dashboard statistics
+
+Every route:
+- Validates input (check required fields, types, lengths)
+- Uses parameterized Prisma queries (no raw SQL string concat)
+- Returns { error: '...' } with correct HTTP status on failure
+- Returns structured JSON on success
+- Strips answerText from ALL public responses (questions routes and token route)
+- Never exposes stack traces
+</backend_routes>
+
+<auth_implementation>
+Session system:
+
+1. Login: POST /api/auth/login
+   - Check username, bcrypt verify password, compare security answers
+   - On success: crypto.randomUUID() token, store in admin_sessions with expiresAt = now+2h
+   - Return { token, expiresAt }
+   - On failure: 500ms delay then 401
+
+2. Middleware (src/middleware/auth.js):
+   - Extract Bearer token from Authorization header
+   - Query admin_sessions: sessionToken matches AND expiresAt > now
+   - If invalid: 401 JSON
+   - If valid: extend expiresAt by 2 hours (sliding window), attach session to req
+   - Export as: module.exports = requireAuth
+
+3. Frontend (public/js/auth.js):
+   const Auth = {
+     SESSION_KEY: 'rls_session',
+     getSession() { try { return JSON.parse(sessionStorage.getItem(this.SESSION_KEY)) } catch { return null } },
+     setSession(data) { sessionStorage.setItem(this.SESSION_KEY, JSON.stringify(data)) },
+     clearSession() { sessionStorage.removeItem(this.SESSION_KEY) },
+     getToken() { return this.getSession()?.token ?? null },
+     isValid() {
+       const s = this.getSession()
+       if (!s) return false
+       return new Date(s.expiresAt) > new Date()
+     },
+     guardPage() { if (!this.isValid()) { window.location.replace('/login.html') } },
+     startExpiryWatcher() {
+       setInterval(() => {
+         const s = this.getSession()
+         if (!s) return
+         const minsLeft = (new Date(s.expiresAt) - Date.now()) / 60000
+         if (minsLeft <= 5 && minsLeft > 0) Utils.showExpiryWarning(Math.ceil(minsLeft))
+         if (minsLeft <= 0) { this.clearSession(); window.location.replace('/login.html') }
+       }, 60000)
+     }
+   }
+</auth_implementation>
+
+<letter_page_full_spec>
+letter.html is the crown of this application. Every detail matters.
+
+PHASE 1 — VALIDATION & LOAD:
+- Extract token from URL
+- Regex validate UUID: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+- Invalid → show "رسالة مجهولة" parchment card immediately (no fetch)
+- Show centered .royal-loader while fetching
+- GET /api/letters/token/:token
+- 404 → show royal 404 parchment with broken wax seal CSS animation
+- Check expiresAt: if expired → show "انتهت صلاحية هذه الرسالة" parchment
+- Load success → hide loader → show Phase 2
+
+PHASE 2 — QUESTION GATE:
+Container: centered parchment card, max-width 520px
+Top: large wax seal + "لفتح هذه الرسالة" heading in gold Cairo font
+Progress: "السؤال 1 من 3" (or however many) in muted text
+
+For each question (ONE AT A TIME):
+- Completed questions above: show as green ✓ rows with question text
+- Current question: full input card
+  • Question text in Cairo 600 var(--ink-800)
+  • .royal-input for answer
+  • gold-btn "تحقق من الإجابة"
+  • Keyboard: Enter key submits
+- Future questions: display:none (not opacity:0)
+
+Correct answer → POST /api/verify/answer:
+  1. Input gets class 'success' (green border + shadow)
+  2. Gold checkmark icon appears with .check-pop animation
+  3. 600ms setTimeout
+  4. Current card fades out (opacity 0, translateY -8px, 300ms)
+  5. Next card fades in (opacity 0→1, translateY 12px→0, 400ms)
+  6. If isLast=true → begin Phase 3
+
+Wrong answer:
+  1. Input gets class 'error' + .shake
+  2. Error text appears: "إجابة خاطئة — حاول مرة أخرى"
+  3. If attemptsLeft <= 0: show lockout
+     • Disable input + button
+     • Show "حاول مرة أخرى بعد MM:SS"
+     • setInterval countdown, re-enable at 0
+
+PHASE 3 — REVEAL SEQUENCE (CSS classes + setTimeout):
+0ms:    Add overlay div (rgba(26,12,6,0.6)), fade in over 700ms
+400ms:  Parchment element: class 'unroll' (scaleY 0→1, 1200ms spring)
+600ms:  Top wax seal: scale 0→1, 400ms spring
+1000ms: Letter header fades in (opacity + translateY 10px→0, 500ms)
+        Header content: mood stamp (if any) + "إلى العزيز [name]" in gold Amiri
+        Date line: "في [day] من [month] لعام [year]م" in Cairo 400 gold
+1400ms: Typewriter on letter body:
+        - Store full text in variable
+        - Display text in Amiri (Arabic) or Cinzel (English)
+        - setInterval 22ms per character
+        - Show blinking | cursor via CSS :after on the span
+        - Preserve line breaks (\n → insert <br> at right time)
+1400ms + chars*22ms:
+        → Remove cursor class
+        + 400ms → Signature section fades in:
+          "أحمد" in large Amiri italic + gold SVG flourish line below
+        + 600ms → Bottom wax seal fades in (same component as top)
+        + 900ms → Action buttons fade in (two buttons):
+          [📜 أرسل ردك الملكي]   [🔁 اقرأ مرة أخرى]   [🖨 طباعة]
+
+LETTER DISPLAY:
+- Container: max-width 700px, centered, min-height 65vh
+- parchment-paper class + CSS texture
+- Gold arabesque SVG border (inline SVG corner ornaments, pure paths)
+- Letter padding: 48px desktop, 24px mobile
+- Mood stamp: large decorative character, gold color, centered, 48px, float above heading
+- Recipient header: "إلى العزيز [name]" — Amiri 28px, var(--gold-700), text-align center
+- Divider: thin gold line (1px, var(--gold-300))
+- Body text: Arabic=Amiri 22px RTL, English=Cinzel 18px LTR
+- Signature section: right-aligned (Arabic) or left-aligned (English)
+  "أحمد" in Amiri italic 26px var(--gold-800)
+  SVG flourish: horizontal decorative line with diamond center
+- Bottom seal: centered, 72px diameter
+
+AFTER REVEAL:
+- PATCH /api/letters/token/:token/read (fire and forget, don't block UI)
+- If letter has reply (check in initial fetch): show reply card BELOW the letter
+  Reply card: .royal-card, heading "رد أحمد ✦", Cairo font, createdAt date shown
+- Re-read button: smooth scrolls to top + replays letter animation without question gate
+
+PRINT STYLES (@media print in royal.css):
+- Hide: #question-gate, .action-buttons, header, footer, .overlay
+- Show: #letter-content only
+- Background: white
+- Font: preserved (Amiri)
+- No shadows, no borders
+- Page break: avoid breaking mid-paragraph
+</letter_page_full_spec>
+
+<all_pages_arabic_content>
+ALL user-facing text must be in Arabic. Here is the complete copy:
+
+index.html:
+  Title:    "الرسائل الملكية"
+  Subtitle: "حيث تحمل الكلمات ثقل التاريخ"
+  Desc:     "منصة رسائل ملكية خاصة، تُكتب بخط القلم وتُفتح بسرّ الأسئلة.
+             أهدِ من تحب رسالةً لا تُنسى، منسوجةً بكلمات الزمن الجميل."
+  Button:   "دخول الملكي ✦"
+
+login.html:
+  Title:       "بوابة الدخول الملكي"
+  Step 1:      "اسم المستخدم" / "كلمة المرور" / "دخول"
+  Step 2:      "سؤال التحقق الأول" / "الإجابة" / "التالي"
+  Step 3:      "سؤال التحقق الثاني" / "الإجابة" / "دخول"
+  Error:       "البيانات غير صحيحة، حاول مرة أخرى"
+
+dashboard.html:
+  Header:      "لوحة التحكم الملكية"
+  Greeting:    "مرحباً يا أحمد ✦"
+  Stats:       "إجمالي الرسائل" / "مقروءة" / "بانتظار الرد" / "ردود جديدة"
+  Table heads: "المستلم" / "العنوان" / "الحالة" / "التاريخ" / "قُرئت" / "الرد" / "إجراءات"
+  Filters:     "الكل" / "مسودة" / "مُرسلة" / "مقروءة" / "تم الرد"
+  Empty:       "لا توجد رسائل بعد — ابدأ بكتابة أول رسالة ملكية"
+  FAB:         "✍ رسالة جديدة"
+  Badge:       "📬 رسائل مقروءة جديدة: N"
+
+compose.html:
+  Title:         "إنشاء رسالة ملكية"
+  Fields:        "اسم المستلم" / "عنوان الرسالة" / "نص الرسالة"
+  Lang toggle:   "عربي" / "English"
+  Mood label:    "طابع الرسالة"
+  Expiry label:  "تاريخ انتهاء الصلاحية (اختياري)"
+  Questions:     "أسئلة فتح الرسالة" / "إضافة سؤال" / "السؤال" / "الإجابة الصحيحة"
+  Templates:     "اختر قالباً" / template names as above
+  Buttons:       "حفظ مسودة" / "إرسال الرسالة" / "معاينة"
+  Autosave:      "تم الحفظ التلقائي ✓"
+  Counter:       "N / 5000 حرف"
+  Validation:    "اسم المستلم مطلوب" / "عنوان الرسالة مطلوب" /
+                 "محتوى الرسالة مطلوب" / "أضف سؤالاً واحداً على الأقل"
+
+letter.html:
+  Loading:   "جارٍ تحميل رسالتك..."
+  Gate title:"لفتح هذه الرسالة، أجب على الأسئلة التالية"
+  Progress:  "السؤال N من M"
+  Btn:       "تحقق من الإجابة ✦"
+  Wrong:     "إجابة خاطئة — حاول مرة أخرى"
+  Locked:    "حاول مرة أخرى بعد MM:SS"
+  Expired:   "انتهت صلاحية هذه الرسالة"
+  NotFound:  "هذه الرسالة غير موجودة"
+  Buttons:   "📜 أرسل ردك الملكي" / "🔁 اقرأ مرة أخرى" / "🖨 طباعة"
+  ReplyHead: "رد أحمد ✦"
+
+reply.html:
+  Title:   "ردّك الملكي"
+  Name:    "اسمك"
+  Body:    "اكتب ردك هنا..."
+  Button:  "إرسال الرد ✦"
+  Success: "تم إرسال ردك الملكي بنجاح ✦"
+
+stats.html:
+  Title:   "إحصائيات الرسائل"
+  Labels:  "توزيع الحالات" / "الرسائل الشهرية" /
+           "متوسط وقت القراءة" / "أكثر مستلم" / "ساعة" / "ساعات" / "رسالة"
+</all_pages_arabic_content>
+
+<replit_config_files>
+.replit:
+run = "npm start"
+entrypoint = "src/server.js"
+[nix]
+channel = "stable-23_11"
+[deployment]
+run = ["sh", "-c", "npm start"]
+deploymentTarget = "cloudrun"
+
+replit.nix:
+{ pkgs }: {
+  deps = [
+    pkgs.nodejs-18_x
+    pkgs.nodePackages.npm
+  ];
+}
+
+package.json:
+{
+  "name": "royal-letters",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "postinstall": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.14.0",
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "qrcode": "^1.5.3"
+  },
+  "devDependencies": {
+    "prisma": "^5.14.0"
+  }
+}
+</replit_config_files>
+
+<self_verification_checklist>
+After every file, verify:
+
+□ No placeholder text, no TODO, no "add code here"
+□ Every async operation shows loading state to user
+□ Network failure shows Arabic error message (not crash)
+□ Empty/null DB data handled gracefully
+□ Mobile 375px: no horizontal overflow, layout intact
+□ All user content uses .textContent (zero innerHTML = userInput)
+□ answerText never returned in public API responses
+□ No secrets or tokens hardcoded in any file
+□ All Prisma queries use parameterized values (no raw string SQL)
+□ Session guard runs as FIRST line on every protected page
+□ All Arabic text is right-aligned with Cairo font
+□ All buttons have hover + active states
+□ All inputs have focus states with gold ring
+
+If any NO → fix before moving to next file.
+</self_verification_checklist>
+
+<output_format>
+For each file:
+
+1. ═══ FILE: path/filename.ext ═══
+2. <plan> — 4 bullets: purpose / risks / security / dependencies
+3. Complete file in code block
+4. ═══ ✓ VERIFIED ═══
+
+Rules:
+— Do NOT stop until every file in <file_structure> is complete
+— Do NOT ask questions — decide and proceed
+— Do NOT write placeholder content of any kind
+— If token limit hit mid-file: write ═══ CONTINUE ═══
+  and resume exactly where you stopped when user writes "continue"
+— Every function must handle errors
+— Every async call must show a loading state
+— Every page must be fully responsive
+</output_format>

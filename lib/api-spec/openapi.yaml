@@ -1,22 +1,29 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Royal Letters API - الرسائل الملكية
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Admin authentication
+  - name: letters
+    description: Letter management
+  - name: verify
+    description: Letter access verification
+  - name: replies
+    description: Letter replies
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +31,321 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: adminLogin
+      tags: [auth]
+      summary: Admin login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: adminLogout
+      tags: [auth]
+      summary: Admin logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /auth/me:
+    get:
+      operationId: getAuthMe
+      tags: [auth]
+      summary: Get current session
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /letters:
+    get:
+      operationId: listLetters
+      tags: [letters]
+      summary: List all letters (admin)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, sent, read, replied]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of letters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterListResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      operationId: createLetter
+      tags: [letters]
+      summary: Create a new letter (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLetterRequest"
+      responses:
+        "201":
+          description: Letter created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /letters/{id}:
+    get:
+      operationId: getLetter
+      tags: [letters]
+      summary: Get letter by ID (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Letter details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterDetailResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      operationId: updateLetter
+      tags: [letters]
+      summary: Update letter (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLetterRequest"
+      responses:
+        "200":
+          description: Letter updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: deleteLetter
+      tags: [letters]
+      summary: Delete letter (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /letters/{id}/send:
+    post:
+      operationId: sendLetter
+      tags: [letters]
+      summary: Mark letter as sent (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Letter sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterResponse"
+
+  /verify/{token}:
+    get:
+      operationId: getLetterByToken
+      tags: [verify]
+      summary: Get letter metadata by token (before verification)
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Letter metadata (no body yet)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterMetaResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /verify/{token}/unlock:
+    post:
+      operationId: unlockLetter
+      tags: [verify]
+      summary: Unlock letter with security answers
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnlockRequest"
+      responses:
+        "200":
+          description: Letter unlocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LetterDetailResponse"
+        "403":
+          description: Wrong answers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /replies:
+    post:
+      operationId: createReply
+      tags: [replies]
+      summary: Submit a reply to a letter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReplyRequest"
+      responses:
+        "201":
+          description: Reply submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplyResponse"
+        "403":
+          description: Letter not accessible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /replies/{letterId}:
+    get:
+      operationId: getLetterReplies
+      tags: [replies]
+      summary: Get replies for a letter (admin)
+      parameters:
+        - name: letterId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of replies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplyListResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +353,253 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required: [error]
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required: [success]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    AuthResponse:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        username:
+          type: string
+      required: [authenticated]
+
+    Question:
+      type: object
+      properties:
+        id:
+          type: string
+        questionText:
+          type: string
+        orderIndex:
+          type: integer
+      required: [id, questionText, orderIndex]
+
+    QuestionInput:
+      type: object
+      properties:
+        questionText:
+          type: string
+        answerText:
+          type: string
+        orderIndex:
+          type: integer
+      required: [questionText, answerText, orderIndex]
+
+    Letter:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        recipientName:
+          type: string
+        uniqueToken:
+          type: string
+        isRead:
+          type: boolean
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        language:
+          type: string
+          enum: [arabic, english]
+        status:
+          type: string
+          enum: [draft, sent, read, replied]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, title, recipientName, uniqueToken, isRead, language, status, createdAt, updatedAt]
+
+    LetterDetail:
+      allOf:
+        - $ref: "#/components/schemas/Letter"
+        - type: object
+          properties:
+            body:
+              type: string
+            questions:
+              type: array
+              items:
+                $ref: "#/components/schemas/Question"
+            replies:
+              type: array
+              items:
+                $ref: "#/components/schemas/Reply"
+          required: [body, questions, replies]
+
+    CreateLetterRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        recipientName:
+          type: string
+        language:
+          type: string
+          enum: [arabic, english]
+        status:
+          type: string
+          enum: [draft, sent]
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionInput"
+      required: [title, body, recipientName]
+
+    UpdateLetterRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        recipientName:
+          type: string
+        language:
+          type: string
+          enum: [arabic, english]
+        status:
+          type: string
+          enum: [draft, sent, read, replied]
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuestionInput"
+
+    LetterResponse:
+      type: object
+      properties:
+        letter:
+          $ref: "#/components/schemas/Letter"
+      required: [letter]
+
+    LetterDetailResponse:
+      type: object
+      properties:
+        letter:
+          $ref: "#/components/schemas/LetterDetail"
+      required: [letter]
+
+    LetterListResponse:
+      type: object
+      properties:
+        letters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Letter"
+        total:
+          type: integer
+      required: [letters, total]
+
+    LetterMetaResponse:
+      type: object
+      properties:
+        title:
+          type: string
+        recipientName:
+          type: string
+        language:
+          type: string
+          enum: [arabic, english]
+        status:
+          type: string
+          enum: [draft, sent, read, replied]
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Question"
+      required: [title, recipientName, language, status, questions]
+
+    UnlockRequest:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            type: object
+            properties:
+              questionId:
+                type: string
+              answer:
+                type: string
+            required: [questionId, answer]
+      required: [answers]
+
+    Reply:
+      type: object
+      properties:
+        id:
+          type: string
+        letterId:
+          type: string
+        replyBody:
+          type: string
+        replyFrom:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, letterId, replyBody, replyFrom, createdAt]
+
+    CreateReplyRequest:
+      type: object
+      properties:
+        token:
+          type: string
+        replyBody:
+          type: string
+        replyFrom:
+          type: string
+      required: [token, replyBody, replyFrom]
+
+    ReplyResponse:
+      type: object
+      properties:
+        reply:
+          $ref: "#/components/schemas/Reply"
+      required: [reply]
+
+    ReplyListResponse:
+      type: object
+      properties:
+        replies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reply"
+      required: [replies]

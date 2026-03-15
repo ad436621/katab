@@ -1,0 +1,17 @@
+packages:
+  "framer-motion": "For beautiful page transitions and letter reveal animations"
+  "lucide-react": "For UI icons"
+  "date-fns": "For formatting dates in the admin dashboard"
+
+images:
+  - path: "artifacts/royal-letters/public/images/parchment-texture.png"
+    description: "Subtle, warm ivory aged parchment paper texture, very minimal and elegant, suitable as a seamless background, no text, no heavy stains"
+    aspect_ratio: "16:9"
+  - path: "artifacts/royal-letters/public/images/gold-particles.png"
+    description: "Abstract floating golden dust and soft glowing orbs on a transparent background, magical and royal"
+    aspect_ratio: "16:9"
+
+notes:
+  - Application uses RTL layout by default for Arabic.
+  - React Query hooks are imported from @workspace/api-client-react.
+  - Wouter used for routing.
