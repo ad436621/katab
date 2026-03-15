@@ -15,9 +15,16 @@ async function cleanExpiredSessions() {
   await db.delete(adminSessionsTable).where(lt(adminSessionsTable.expiresAt, new Date()));
 }
 
+// Get admin security questions (public)
+router.get("/security-questions", (_req, res) => {
+  const q1 = process.env.SECURITY_Q1 || "ما هو اسم والدتك قبل الزواج؟";
+  const q2 = process.env.SECURITY_Q2 || "ما هو اسم مدرستك الابتدائية؟";
+  return res.json({ q1, q2 });
+});
+
 router.post("/login", async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, securityAnswer1, securityAnswer2 } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({ error: "missing_fields", message: "اسم المستخدم وكلمة المرور مطلوبان" });
@@ -40,6 +47,27 @@ router.post("/login", async (req, res) => {
 
     if (!passwordValid) {
       return res.status(401).json({ error: "invalid_credentials", message: "بيانات الدخول غير صحيحة" });
+    }
+
+    // Verify security questions if they are configured
+    const expectedA1 = process.env.SECURITY_A1;
+    const expectedA2 = process.env.SECURITY_A2;
+
+    if (expectedA1 || expectedA2) {
+      if (!securityAnswer1 || !securityAnswer2) {
+        return res.status(428).json({ 
+          error: "security_questions_required", 
+          message: "يرجى الإجابة على أسئلة الأمان"
+        });
+      }
+
+      if (expectedA1 && securityAnswer1.toLowerCase().trim() !== expectedA1.toLowerCase().trim()) {
+        return res.status(401).json({ error: "wrong_security_answer", message: "إجابة سؤال الأمان غير صحيحة" });
+      }
+
+      if (expectedA2 && securityAnswer2.toLowerCase().trim() !== expectedA2.toLowerCase().trim()) {
+        return res.status(401).json({ error: "wrong_security_answer", message: "إجابة سؤال الأمان غير صحيحة" });
+      }
     }
 
     await cleanExpiredSessions();

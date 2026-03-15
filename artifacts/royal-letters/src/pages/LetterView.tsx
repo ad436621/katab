@@ -1,18 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRoute } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  useGetLetterByToken, 
+import {
+  useGetLetterByToken,
   useUnlockLetter,
   useCreateReply,
-  LetterDetailResponse
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { WaxSeal } from "@/components/WaxSeal";
 import { ArabesqueDivider } from "@/components/ArabesqueDivider";
-import { Lock, Unlock, Send, Loader2 } from "lucide-react";
+import { Lock, Unlock, Send, Loader2, Crown, User, MessageSquare } from "lucide-react";
+import { format } from "date-fns";
+import { ar } from "date-fns/locale";
 
 export default function LetterView() {
   const [, params] = useRoute("/letter/:token");
@@ -24,9 +25,9 @@ export default function LetterView() {
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [unlockedData, setUnlockedData] = useState<LetterDetailResponse | null>(null);
+  const [unlockedData, setUnlockedData] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState("");
-  
+
   const [replyBody, setReplyBody] = useState("");
   const [replyFrom, setReplyFrom] = useState("");
   const [replySuccess, setReplySuccess] = useState(false);
@@ -50,18 +51,17 @@ export default function LetterView() {
       setErrorMsg("");
       const formattedAnswers = Object.entries(answers).map(([id, answer]) => ({
         questionId: id,
-        answer: answer.trim()
+        answer: answer.trim(),
       }));
 
       const result = await unlockMutation.mutateAsync({
         token,
-        data: { answers: formattedAnswers }
+        data: { answers: formattedAnswers },
       });
-      
+
       setUnlockedData(result);
-    } catch (err: any) {
-      setErrorMsg("بعض الإجابات غير صحيحة. حاول مرة أخرى.");
-      // Reset to first question on fail to re-verify
+    } catch {
+      setErrorMsg("إجابة غير صحيحة. حاول مرة أخرى.");
       setCurrentQuestionIndex(0);
       setAnswers({});
     }
@@ -71,10 +71,10 @@ export default function LetterView() {
     if (!replyBody.trim() || !replyFrom.trim()) return;
     try {
       await replyMutation.mutateAsync({
-        data: { token, replyBody, replyFrom }
+        data: { token, replyBody, replyFrom },
       });
       setReplySuccess(true);
-    } catch (err) {
+    } catch {
       alert("حدث خطأ أثناء إرسال الرد");
     }
   };
@@ -93,21 +93,24 @@ export default function LetterView() {
         <div className="text-center p-8 max-w-md">
           <Lock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
           <h2 className="font-display text-2xl mb-2 text-foreground">رسالة غير صالحة</h2>
-          <p className="text-muted-foreground">الرمز الذي أدخلته غير صحيح أو أن الرسالة لم تعد متوفرة.</p>
+          <p className="text-muted-foreground">الرمز غير صحيح أو الرسالة غير متوفرة.</p>
         </div>
       </div>
     );
   }
 
+  const replies: any[] = unlockedData?.letter?.replies || [];
+  const adminReplies = replies.filter((r: any) => r.replyFrom === "__admin__" || r.isAdmin);
+  const recipientReplies = replies.filter((r: any) => r.replyFrom !== "__admin__" && !r.isAdmin);
+
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-primary/20 selection:text-primary">
-      {/* Decorative Background Elements */}
-      <div className="fixed inset-0 bg-parchment-pattern opacity-50 mix-blend-multiply pointer-events-none" />
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.8)_0%,transparent_100%)] pointer-events-none" />
-      
-      <main className="relative z-10 w-full max-w-4xl mx-auto px-4 py-12 md:py-24 min-h-screen flex flex-col items-center">
-        
-        {/* State 1: Security Verification */}
+    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-primary/20 selection:text-primary" dir="rtl">
+      <div className="fixed inset-0 bg-parchment-pattern opacity-40 mix-blend-multiply pointer-events-none" />
+      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.8)_0%,transparent_70%)] pointer-events-none" />
+
+      <main className="relative z-10 w-full max-w-4xl mx-auto px-4 py-12 md:py-20 min-h-screen flex flex-col items-center">
+
+        {/* LOCK SCREEN */}
         <AnimatePresence mode="wait">
           {!isUnlocked && (
             <motion.div
@@ -116,18 +119,18 @@ export default function LetterView() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
               transition={{ duration: 0.6 }}
-              className="w-full max-w-md mt-12"
+              className="w-full max-w-md mt-8"
             >
               <div className="text-center mb-10">
                 <WaxSeal className="w-24 h-24 mx-auto mb-6" />
-                <h1 className="font-display text-4xl text-gradient-gold mb-2">رسالة مغلقة</h1>
-                <p className="text-lg text-foreground/80">إلى: {metaData.recipientName}</p>
+                <h1 className="font-display text-4xl text-gradient-gold mb-2">رسالة مختومة</h1>
+                <p className="text-lg text-foreground/80 font-sans">إلى: <strong>{metaData.recipientName}</strong></p>
               </div>
 
               {questions.length > 0 ? (
-                <div className="bg-card/80 backdrop-blur-md border border-[#C9A84C]/30 p-8 rounded-3xl shadow-xl royal-shadow">
+                <div className="bg-card/80 backdrop-blur-md border border-[#C9A84C]/30 p-8 rounded-3xl shadow-2xl royal-shadow">
                   {errorMsg && (
-                    <div className="mb-6 p-3 bg-destructive/10 text-destructive text-sm text-center rounded-xl font-medium border border-destructive/20">
+                    <div className="mb-6 p-3 bg-destructive/10 text-destructive text-sm text-center rounded-xl border border-destructive/20">
                       {errorMsg}
                     </div>
                   )}
@@ -140,15 +143,20 @@ export default function LetterView() {
                       exit={{ opacity: 0, x: -20 }}
                       className="space-y-6"
                     >
-                      <div className="space-y-2 text-center">
-                        <span className="text-xs font-bold text-primary tracking-widest uppercase mb-2 block">
+                      <div className="space-y-3 text-center">
+                        <span className="text-xs font-bold text-primary tracking-widest block">
                           سؤال الأمان {currentQuestionIndex + 1} من {questions.length}
                         </span>
+                        <div className="flex justify-center gap-2 mb-4">
+                          {questions.map((_, i) => (
+                            <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i <= currentQuestionIndex ? "w-8 bg-primary" : "w-4 bg-muted"}`} />
+                          ))}
+                        </div>
                         <h3 className="font-display text-2xl text-foreground">
                           {questions[currentQuestionIndex].questionText}
                         </h3>
                       </div>
-                      
+
                       <Input
                         autoFocus
                         placeholder="أدخل إجابتك هنا..."
@@ -159,7 +167,7 @@ export default function LetterView() {
                       />
 
                       <Button variant="royal" className="w-full h-14 text-lg" onClick={handleNextQuestion}>
-                        التالي
+                        التالي ←
                       </Button>
                     </motion.div>
                   ) : (
@@ -168,32 +176,35 @@ export default function LetterView() {
                       animate={{ opacity: 1, scale: 1 }}
                       className="text-center space-y-6"
                     >
-                      <div className="w-20 h-20 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/20">
+                      <div className="w-20 h-20 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center mx-auto border border-green-500/20">
                         <Unlock className="w-10 h-10" />
                       </div>
-                      <h3 className="font-display text-2xl text-foreground">تمت الإجابة</h3>
-                      <p className="text-muted-foreground">فض الختم للاطلاع على محتوى الرسالة الملكية.</p>
-                      
-                      <Button 
-                        variant="royal" 
-                        className="w-full h-14 text-lg" 
+                      <h3 className="font-display text-2xl">أجبت على جميع الأسئلة</h3>
+                      <p className="text-muted-foreground">يمكنك الآن فض الختم وقراءة الرسالة.</p>
+                      <Button
+                        variant="royal"
+                        className="w-full h-14 text-lg"
                         onClick={handleUnlock}
-                        isLoading={unlockMutation.isPending}
+                        disabled={unlockMutation.isPending}
                       >
-                        فتح الرسالة
+                        {unlockMutation.isPending
+                          ? <span className="flex items-center gap-2"><Loader2 className="animate-spin w-5 h-5" /> جارٍ الفتح...</span>
+                          : "فض الختم وافتح الرسالة"}
                       </Button>
                     </motion.div>
                   )}
                 </div>
               ) : (
                 <div className="text-center mt-12">
-                  <Button 
-                    variant="royal" 
-                    className="h-16 px-12 text-xl rounded-full shadow-2xl" 
+                  <Button
+                    variant="royal"
+                    className="h-16 px-12 text-xl rounded-full shadow-2xl"
                     onClick={handleUnlock}
-                    isLoading={unlockMutation.isPending}
+                    disabled={unlockMutation.isPending}
                   >
-                    فض الختم وفتح الرسالة
+                    {unlockMutation.isPending
+                      ? <span className="flex items-center gap-2"><Loader2 className="animate-spin w-5 h-5" />جارٍ الفتح...</span>
+                      : "فض الختم وافتح الرسالة"}
                   </Button>
                 </div>
               )}
@@ -201,7 +212,7 @@ export default function LetterView() {
           )}
         </AnimatePresence>
 
-        {/* State 2: Unlocked Letter View */}
+        {/* LETTER CONTENT */}
         <AnimatePresence>
           {isUnlocked && unlockedData && (
             <motion.div
@@ -211,94 +222,139 @@ export default function LetterView() {
               transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
               className="w-full"
             >
-              {/* The Parchment Paper */}
-              <div className="relative w-full bg-[#FAF7F0] shadow-2xl rounded-sm p-8 md:p-16 lg:p-24 border border-[#e6dbb8] royal-shadow overflow-hidden">
-                {/* Paper texture overlay inside */}
-                <div className="absolute inset-0 bg-parchment-pattern opacity-60 mix-blend-multiply pointer-events-none" />
-                
-                {/* Golden inner border */}
-                <div className="absolute inset-4 md:inset-6 border-[1.5px] border-[#C9A84C]/40 pointer-events-none" />
-                <div className="absolute inset-[18px] md:inset-[26px] border-[0.5px] border-[#C9A84C]/20 pointer-events-none" />
+              {/* Parchment Paper */}
+              <div className="relative w-full bg-[#FAF7F0] shadow-2xl rounded-sm p-8 md:p-16 lg:p-20 border border-[#e6dbb8] royal-shadow overflow-hidden">
+                <div className="absolute inset-0 bg-parchment-pattern opacity-50 mix-blend-multiply pointer-events-none" />
+                <div className="absolute inset-4 md:inset-6 border border-[#C9A84C]/40 pointer-events-none" />
+                <div className="absolute inset-[18px] md:inset-[26px] border border-[#C9A84C]/15 pointer-events-none" />
 
                 <div className="relative z-10">
                   <div className="flex justify-center mb-8">
-                    <WaxSeal className="w-20 h-20 shadow-none drop-shadow-md" />
+                    <WaxSeal className="w-20 h-20 drop-shadow-md" />
                   </div>
-                  
-                  <div className="text-center mb-12">
-                    <h1 className="font-display text-4xl md:text-5xl text-[#2C1810] mb-4">
+
+                  <div className="text-center mb-10">
+                    <h1 className="font-display text-4xl md:text-5xl text-[#2C1810] mb-3">
                       {unlockedData.letter.title}
                     </h1>
                     <p className="font-sans text-xl text-[#5a4231]">
-                      إلى السيد/ة: <span className="font-bold">{unlockedData.letter.recipientName}</span>
+                      إلى السيد/ة: <strong>{unlockedData.letter.recipientName}</strong>
                     </p>
                   </div>
 
                   <ArabesqueDivider className="mb-12" />
 
-                  <div 
-                    className="font-script text-[26px] md:text-[32px] leading-[2.5] text-[#2C1810] text-justify whitespace-pre-wrap px-2 md:px-8"
-                    dir={unlockedData.letter.language === 'english' ? 'ltr' : 'rtl'}
+                  <div
+                    className="font-script text-[26px] md:text-[30px] leading-[2.6] text-[#2C1810] whitespace-pre-wrap px-2 md:px-8"
+                    dir={unlockedData.letter.language === "english" ? "ltr" : "rtl"}
+                    style={{ textAlign: unlockedData.letter.language === "english" ? "left" : "right" }}
                   >
                     {unlockedData.letter.body}
                   </div>
 
-                  <ArabesqueDivider className="mt-16 mb-8" />
-                  
-                  <div className="text-left font-sans text-sm text-[#8b7355] mt-8" dir="ltr">
-                    صدرت في: {new Date(unlockedData.letter.createdAt).toLocaleDateString('ar-SA', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </div>
+                  <ArabesqueDivider className="mt-14 mb-8" />
+
+                  <p className="text-right text-sm text-[#8b7355] font-sans">
+                    صدرت في: {format(new Date(unlockedData.letter.createdAt), "d MMMM yyyy", { locale: ar })}
+                  </p>
                 </div>
               </div>
 
-              {/* Reply Section */}
-              <motion.div 
+              {/* Conversation Thread */}
+              {replies.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 1.5 }}
+                  className="mt-12 max-w-2xl mx-auto space-y-4"
+                >
+                  <h3 className="font-display text-xl flex items-center gap-2 text-foreground">
+                    <MessageSquare className="w-5 h-5 text-primary" /> المراسلات
+                  </h3>
+                  {replies.map((reply: any) => {
+                    const isAdminReply = reply.replyFrom === "__admin__" || reply.isAdmin;
+                    return (
+                      <motion.div
+                        key={reply.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`flex gap-3 ${isAdminReply ? "flex-row-reverse" : ""}`}
+                      >
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isAdminReply ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}>
+                          {isAdminReply ? <Crown className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                        </div>
+                        <div className={`max-w-sm flex flex-col ${isAdminReply ? "items-end" : "items-start"}`}>
+                          <div className={`px-4 py-3 rounded-2xl font-script text-lg leading-relaxed ${isAdminReply ? "bg-primary/10 border border-primary/20 rounded-tr-sm text-[#2C1810]" : "bg-muted/60 border border-border/50 rounded-tl-sm"}`}>
+                            <p className="text-xs font-sans font-semibold text-muted-foreground mb-1">
+                              {isAdminReply ? "أحمد" : reply.replyFrom}
+                            </p>
+                            <p>{reply.replyBody}</p>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 font-sans">
+                            {format(new Date(reply.createdAt), "d MMM - HH:mm", { locale: ar })}
+                          </p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </motion.div>
+              )}
+
+              {/* Reply Form */}
+              <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 2, duration: 1 }}
-                className="mt-16 max-w-2xl mx-auto"
+                className="mt-12 max-w-2xl mx-auto"
               >
                 {!replySuccess ? (
-                  <div className="bg-card/50 backdrop-blur-sm border border-[#C9A84C]/30 p-8 rounded-3xl shadow-lg">
-                    <h3 className="font-display text-2xl text-foreground mb-6">إرسال رد على الرسالة</h3>
-                    <div className="space-y-6">
+                  <div className="bg-card/60 backdrop-blur-sm border border-[#C9A84C]/30 p-8 rounded-3xl shadow-lg">
+                    <h3 className="font-display text-2xl text-foreground mb-6 flex items-center gap-2">
+                      <Send className="w-5 h-5 text-primary" /> أرسل رداً
+                    </h3>
+                    <div className="space-y-5">
                       <div className="space-y-2">
-                        <label className="text-sm font-semibold">اسم المرسل</label>
-                        <Input 
-                          placeholder="الاسم الكريم..." 
-                          className="bg-background"
+                        <label className="text-sm font-semibold font-sans">اسمك الكريم</label>
+                        <Input
+                          placeholder="أدخل اسمك..."
+                          className="bg-background h-12"
                           value={replyFrom}
                           onChange={e => setReplyFrom(e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-semibold">محتوى الرد</label>
-                        <Textarea 
-                          placeholder="اكتب ردك هنا..." 
-                          className="bg-background min-h-[150px]"
+                        <label className="text-sm font-semibold font-sans">رسالتك</label>
+                        <Textarea
+                          placeholder="اكتب ردك هنا..."
+                          className="bg-background min-h-[140px] font-script text-xl leading-loose"
                           value={replyBody}
                           onChange={e => setReplyBody(e.target.value)}
                         />
                       </div>
-                      <Button 
-                        variant="royal" 
-                        className="w-full h-12" 
+                      <Button
+                        variant="royal"
+                        className="w-full h-12 text-base"
                         onClick={handleReply}
-                        isLoading={replyMutation.isPending}
-                        disabled={!replyBody.trim() || !replyFrom.trim()}
+                        disabled={replyMutation.isPending || !replyBody.trim() || !replyFrom.trim()}
                       >
-                        <Send className="w-4 h-4 me-2" /> إرسال الرد
+                        {replyMutation.isPending
+                          ? <span className="flex items-center gap-2"><Loader2 className="animate-spin w-4 h-4" />جارٍ الإرسال...</span>
+                          : <><Send className="w-4 h-4 me-2" /> إرسال الرد</>}
                       </Button>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-green-500/10 border border-green-500/20 p-8 rounded-3xl text-center">
-                    <div className="w-16 h-16 bg-green-500/20 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-green-50 border border-green-200 p-10 rounded-3xl text-center"
+                  >
+                    <div className="w-16 h-16 bg-green-500/20 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-200">
                       <Send className="w-8 h-8" />
                     </div>
-                    <h3 className="font-display text-2xl text-green-800 dark:text-green-400 mb-2">تم الإرسال بنجاح</h3>
-                    <p className="text-green-700/80 dark:text-green-300/80">لقد تم إرسال ردكم إلى الديوان، شكراً لكم.</p>
-                  </div>
+                    <h3 className="font-display text-2xl text-green-800 mb-2">تم إرسال ردك بنجاح</h3>
+                    <p className="text-green-700/80 font-sans">شكراً لك، وصلنا ردك إلى الديوان.</p>
+                  </motion.div>
                 )}
               </motion.div>
             </motion.div>

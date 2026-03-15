@@ -8,6 +8,7 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Compose from "@/pages/Compose";
 import LetterView from "@/pages/LetterView";
+import LetterDetail from "@/pages/LetterDetail";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -22,17 +23,13 @@ const queryClient = new QueryClient({
 function Router() {
   return (
     <Switch>
-      {/* Public Routes */}
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
       <Route path="/letter/:token" component={LetterView} />
-
-      {/* Admin Protected Routes */}
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/compose" component={Compose} />
       <Route path="/compose/:id" component={Compose} />
-
-      {/* 404 */}
+      <Route path="/letters/:id" component={LetterDetail} />
       <Route component={NotFound} />
     </Switch>
   );

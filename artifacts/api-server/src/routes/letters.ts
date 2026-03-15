@@ -90,6 +90,7 @@ router.post("/", requireAdmin, async (req, res) => {
   }
 });
 
+// Admin: get full letter with answers (for editing)
 router.get("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -111,15 +112,17 @@ router.get("/:id", requireAdmin, async (req, res) => {
       .select()
       .from(repliesTable)
       .where(eq(repliesTable.letterId, id))
-      .orderBy(desc(repliesTable.createdAt));
+      .orderBy(repliesTable.createdAt);
 
     return res.json({
       letter: {
         ...formatLetter(letter),
         body: letter.body,
+        // Return answers for admin editing
         questions: questions.map(q => ({
           id: q.id,
           questionText: q.questionText,
+          answerText: q.answerText, // Admin can see answers
           orderIndex: q.orderIndex,
         })),
         replies: replies.map(r => ({
@@ -127,6 +130,7 @@ router.get("/:id", requireAdmin, async (req, res) => {
           letterId: r.letterId,
           replyBody: r.replyBody,
           replyFrom: r.replyFrom,
+          isAdmin: r.replyFrom === "__admin__",
           createdAt: r.createdAt.toISOString(),
         })),
       },
@@ -217,6 +221,45 @@ router.post("/:id/send", requireAdmin, async (req, res) => {
     return res.json({ letter: formatLetter(updated) });
   } catch (err) {
     console.error("Send letter error:", err);
+    return res.status(500).json({ error: "server_error", message: "خطأ في الخادم" });
+  }
+});
+
+// Admin reply to a letter
+router.post("/:id/admin-reply", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { replyBody } = req.body;
+
+    if (!replyBody?.trim()) {
+      return res.status(400).json({ error: "missing_body", message: "نص الرد مطلوب" });
+    }
+
+    const existing = await db.select().from(lettersTable).where(eq(lettersTable.id, id));
+    if (!existing[0]) {
+      return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
+    }
+
+    const adminName = process.env.ADMIN_USERNAME || "ahmed";
+
+    const [reply] = await db.insert(repliesTable).values({
+      letterId: id,
+      replyBody,
+      replyFrom: "__admin__",
+    }).returning();
+
+    return res.status(201).json({
+      reply: {
+        id: reply.id,
+        letterId: reply.letterId,
+        replyBody: reply.replyBody,
+        replyFrom: adminName,
+        isAdmin: true,
+        createdAt: reply.createdAt.toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error("Admin reply error:", err);
     return res.status(500).json({ error: "server_error", message: "خطأ في الخادم" });
   }
 });

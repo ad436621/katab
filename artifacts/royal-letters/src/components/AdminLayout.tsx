@@ -87,7 +87,10 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
         <header className="h-16 border-b border-border/50 bg-card/50 backdrop-blur-md flex items-center px-8 shrink-0 z-10">
           <h2 className="font-display text-xl text-foreground">
-            {location === "/dashboard" ? "الرسائل الصادرة والواردة" : "صياغة رسالة"}
+            {location === "/dashboard" ? "الرسائل الصادرة والواردة"
+              : location.startsWith("/letters/") ? "تفاصيل الرسالة"
+              : location.startsWith("/compose") ? "صياغة رسالة"
+              : "الديوان الملكي"}
           </h2>
         </header>
         <div className="flex-1 overflow-auto p-8 z-0 relative">
