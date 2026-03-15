@@ -1,10 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Scheherazade+New:wght@400;700&family=Reem+Kufi:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rakkas&family=Aref+Ruqaa+Ink:wght@400;700&family=Cairo:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: 'Cairo', sans-serif;
-  --font-display: 'Reem Kufi', sans-serif;
-  --font-script: 'Scheherazade New', serif;
+  --font-sans: 'Rakkas', serif;
+  --font-display: 'Rakkas', serif;
+  --font-script: 'Aref Ruqaa Ink', serif;
 
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));

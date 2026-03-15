@@ -31,38 +31,15 @@ export default function Login() {
       .catch(() => {});
   }, []);
 
-  const handleCredentials = async (e: React.FormEvent) => {
+  const handleCredentials = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!username.trim() || !password.trim()) {
       setError("يرجى إدخال اسم المستخدم وكلمة المرور");
       return;
     }
-    // Try login without security answers first — if server requires them, move to step 2
-    setIsLoading(true);
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-
-      if (res.status === 428 || data.error === "security_questions_required") {
-        // Server wants security questions
-        setStep("security");
-        setError("");
-      } else if (res.ok && data.authenticated) {
-        setLocation("/dashboard");
-      } else {
-        setError(data.message || "بيانات الدخول غير صحيحة");
-      }
-    } catch {
-      setError("حدث خطأ في الاتصال بالخادم");
-    } finally {
-      setIsLoading(false);
-    }
+    // Always go to security questions step
+    setStep("security");
   };
 
   const handleSecurityStep = async (e: React.FormEvent) => {
