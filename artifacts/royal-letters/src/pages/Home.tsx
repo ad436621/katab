@@ -73,6 +73,21 @@ export default function Home() {
           </div>
         </form>
       </motion.div>
+
+      {/* Subtle admin link */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 2, duration: 1 }}
+        className="absolute bottom-6 z-10"
+      >
+        <a
+          href="/login"
+          className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors font-sans"
+        >
+          دخول الديوان
+        </a>
+      </motion.div>
     </div>
   );
 }
