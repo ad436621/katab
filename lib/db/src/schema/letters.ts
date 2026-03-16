@@ -42,6 +42,25 @@ export const adminSessionsTable = pgTable("admin_sessions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const adminConfigTable = pgTable("admin_config", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  username: text("username").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  securityQ1: text("security_q1"),
+  securityQ2: text("security_q2"),
+  securityA1Hash: text("security_a1_hash"),
+  securityA2Hash: text("security_a2_hash"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const pushSubscriptionsTable = pgTable("push_subscriptions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertLetterSchema = createInsertSchema(lettersTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertQuestionSchema = createInsertSchema(questionsTable).omit({ id: true });
 export const insertReplySchema = createInsertSchema(repliesTable).omit({ id: true, createdAt: true });

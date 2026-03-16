@@ -1,0 +1,171 @@
+You are a senior full-stack engineer. Your task is to **audit, fix, and enhance the existing project** while preserving the current architecture and avoiding major breaking changes.
+
+The project is already functional, but it contains several logical, security, and usability issues that must be corrected and improved.
+
+Your goal is to **refactor intelligently**, not rebuild the project.
+
+---
+
+## 1. Encryption & Data Handling (Critical Fix)
+
+There is currently a major issue with how encryption is implemented.
+
+Encrypted values (such as usernames or other fields) sometimes appear on the website as encrypted text.
+This is incorrect behavior.
+
+### Required Fix
+
+* Encryption must be used **only for database storage and security**.
+* The user interface must **always display readable data**.
+* Encrypted or hashed values must **never appear directly in the UI**.
+
+### Correct Architecture
+
+* Sensitive data stored in the database → encrypted or hashed.
+* Data retrieved from the database → properly decrypted (if encryption) before display.
+* Passwords must remain **hashed only** (never decrypted).
+
+### Implementation Rules
+
+* Keep encryption logic in the **backend layer only**.
+* The frontend should only receive **clean readable values**.
+* Prevent any encrypted strings from rendering in UI components.
+
+---
+
+## 2. Admin Account Management
+
+Add a secure **Admin Account Settings panel**.
+
+The admin must be able to:
+
+* Change username
+* Change password
+* Update security questions
+* Update security question answers
+
+### Requirements
+
+* Proper validation and sanitization.
+* Password must be **securely hashed** before storing.
+* Security answers should be **hashed if possible**.
+* Update database safely.
+* Prevent unauthorized access.
+
+### UI
+
+Add a clean **Admin Settings page** where the admin can manage these fields.
+
+---
+
+## 3. Mobile Responsiveness (Mobile-First Refactor)
+
+Refactor the UI so the entire website is **fully responsive and optimized for mobile devices**.
+
+Use a **mobile-first design strategy**.
+
+### Target Devices
+
+* 320px phones
+* 375px iPhone
+* 480px Android phones
+* tablets
+* desktop
+
+### Required Improvements
+
+1. Fix horizontal scrolling and overflow issues.
+2. Ensure containers scale properly on small screens.
+3. Use **flexbox or CSS grid** layouts.
+4. Implement proper responsive breakpoints.
+5. Improve spacing, padding, and margins.
+6. Improve typography scaling.
+7. Ensure buttons are **touch friendly (minimum height 44px)**.
+8. Ensure forms and inputs work correctly on phones.
+9. Optimize cards, images, and message components.
+10. Maintain visual balance across devices.
+
+Important rule:
+**Do not break the desktop layout while optimizing for mobile.**
+
+---
+
+## 4. Progressive Web App (PWA)
+
+Make the website installable on mobile devices.
+
+### Requirements
+
+Implement PWA support including:
+
+* manifest.json
+* service worker
+* install prompt
+* offline caching for static assets
+
+After this change users should be able to:
+
+• Install the site to their phone home screen
+• Open it like a native app
+
+---
+
+## 5. Push Notifications System
+
+Implement push notifications for important events.
+
+Admin should receive notifications when:
+
+• A recipient opens a message
+• A recipient reads the message
+• A recipient replies to a message
+
+### Suggested Architecture
+
+Frontend
+
+* Service Worker
+* Push API
+* Notification API
+
+Backend
+
+* Event triggers
+* Push message sender
+
+Notifications must work after the site is installed as a PWA.
+
+---
+
+## 6. General Stability Improvements
+
+Perform a general quality improvement pass:
+
+* Fix UI inconsistencies.
+* Remove layout bugs.
+* Improve accessibility.
+* Improve loading performance.
+* Ensure clean component structure.
+
+---
+
+## 7. Important Constraints
+
+You must **NOT**:
+
+* Rewrite the entire project
+* Change the project framework
+* Break the current architecture
+
+Instead:
+
+• Fix issues
+• Improve structure
+• Add missing features
+• Maintain compatibility
+
+---
+
+## Final Goal
+
+The final result should be a **secure, responsive, installable web application** that works smoothly on mobile devices and provides a polished user experience while keeping the existing project structure intact.
