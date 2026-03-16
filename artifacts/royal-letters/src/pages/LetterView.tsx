@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { WaxSeal } from "@/components/WaxSeal";
 import { ArabesqueDivider } from "@/components/ArabesqueDivider";
-import { Lock, Unlock, Send, Loader2, Crown, User, MessageSquare } from "lucide-react";
+import { Lock, Send, Loader2, Crown, User, MessageSquare, AlertCircle, CheckCircle2 } from "lucide-react";
 import { format } from "date-fns";
 import { ar } from "date-fns/locale";
 
@@ -26,29 +26,34 @@ export default function LetterView() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [unlockedData, setUnlockedData] = useState<any>(null);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [questionError, setQuestionError] = useState<{ message: string; failedIndex?: number } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [replyBody, setReplyBody] = useState("");
   const [replyFrom, setReplyFrom] = useState("");
   const [replySuccess, setReplySuccess] = useState(false);
 
   const questions = metaData?.questions || [];
-  const isComplete = currentQuestionIndex >= questions.length;
-  const isUnlocked = !!unlockedData;
+  const isLastQuestion = currentQuestionIndex === questions.length - 1;
 
-  const handleNextQuestion = () => {
+  const handleAnswer = async (e: React.FormEvent) => {
+    e.preventDefault();
     const currentQ = questions[currentQuestionIndex];
     if (!answers[currentQ.id]?.trim()) {
-      setErrorMsg("الرجاء إدخال الإجابة");
+      setQuestionError({ message: "الرجاء إدخال الإجابة", failedIndex: currentQuestionIndex });
       return;
     }
-    setErrorMsg("");
-    setCurrentQuestionIndex(prev => prev + 1);
-  };
+    setQuestionError(null);
 
-  const handleUnlock = async () => {
+    if (!isLastQuestion) {
+      // Move to next question
+      setCurrentQuestionIndex(prev => prev + 1);
+      return;
+    }
+
+    // Last question — submit all answers to API
+    setSubmitting(true);
     try {
-      setErrorMsg("");
       const formattedAnswers = Object.entries(answers).map(([id, answer]) => ({
         questionId: id,
         answer: answer.trim(),
@@ -60,10 +65,20 @@ export default function LetterView() {
       });
 
       setUnlockedData(result);
-    } catch {
-      setErrorMsg("إجابة غير صحيحة. حاول مرة أخرى.");
-      setCurrentQuestionIndex(0);
-      setAnswers({});
+    } catch (err: any) {
+      const errorData = err?.response?.data || err?.data || {};
+      const failedIndex = errorData.failedIndex ?? currentQuestionIndex;
+      const message = errorData.message || "إجابة خاطئة، حاول مرة أخرى";
+
+      // Go back to the failed question and clear only its answer
+      const failedQ = questions[failedIndex];
+      if (failedQ) {
+        setAnswers(prev => ({ ...prev, [failedQ.id]: "" }));
+        setCurrentQuestionIndex(failedIndex);
+      }
+      setQuestionError({ message, failedIndex });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -100,11 +115,10 @@ export default function LetterView() {
   }
 
   const replies: any[] = unlockedData?.letter?.replies || [];
-  const adminReplies = replies.filter((r: any) => r.replyFrom === "__admin__" || r.isAdmin);
-  const recipientReplies = replies.filter((r: any) => r.replyFrom !== "__admin__" && !r.isAdmin);
+  const isUnlocked = !!unlockedData;
 
   return (
-    <div className="min-h-screen bg-background relative overflow-x-hidden selection:bg-primary/20 selection:text-primary" dir="rtl">
+    <div className="min-h-screen bg-background relative overflow-x-hidden" dir="rtl">
       <div className="fixed inset-0 bg-parchment-pattern opacity-40 mix-blend-multiply pointer-events-none" />
       <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.8)_0%,transparent_70%)] pointer-events-none" />
 
@@ -124,82 +138,106 @@ export default function LetterView() {
               <div className="text-center mb-10">
                 <WaxSeal className="w-24 h-24 mx-auto mb-6" />
                 <h1 className="font-display text-4xl text-gradient-gold mb-2">رسالة مختومة</h1>
-                <p className="text-lg text-foreground/80 font-sans">إلى: <strong>{metaData.recipientName}</strong></p>
+                <p className="text-lg text-foreground/80">إلى: <strong>{metaData.recipientName}</strong></p>
               </div>
 
               {questions.length > 0 ? (
                 <div className="bg-card/80 backdrop-blur-md border border-[#C9A84C]/30 p-8 rounded-3xl shadow-2xl royal-shadow">
-                  {errorMsg && (
-                    <div className="mb-6 p-3 bg-destructive/10 text-destructive text-sm text-center rounded-xl border border-destructive/20">
-                      {errorMsg}
-                    </div>
-                  )}
+                  {/* Progress dots */}
+                  <div className="flex justify-center gap-2 mb-6">
+                    {questions.map((_, i) => (
+                      <div
+                        key={i}
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          i < currentQuestionIndex
+                            ? "w-8 bg-green-500"
+                            : i === currentQuestionIndex
+                            ? "w-8 bg-primary"
+                            : "w-3 bg-muted"
+                        }`}
+                      />
+                    ))}
+                  </div>
 
-                  {!isComplete ? (
-                    <motion.div
+                  <AnimatePresence mode="wait">
+                    <motion.form
                       key={currentQuestionIndex}
                       initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
+                      animate={{ opacity: 1, y: 0, opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
-                      className="space-y-6"
+                      transition={{ duration: 0.25 }}
+                      onSubmit={handleAnswer}
+                      className="space-y-5"
                     >
-                      <div className="space-y-3 text-center">
+                      <div className="text-center space-y-2">
                         <span className="text-xs font-bold text-primary tracking-widest block">
-                          سؤال الأمان {currentQuestionIndex + 1} من {questions.length}
+                          سؤال {currentQuestionIndex + 1} من {questions.length}
                         </span>
-                        <div className="flex justify-center gap-2 mb-4">
-                          {questions.map((_, i) => (
-                            <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i <= currentQuestionIndex ? "w-8 bg-primary" : "w-4 bg-muted"}`} />
-                          ))}
-                        </div>
-                        <h3 className="font-display text-2xl text-foreground">
+                        <h3 className="font-display text-2xl text-foreground leading-snug">
                           {questions[currentQuestionIndex].questionText}
                         </h3>
                       </div>
 
+                      {/* Error message for this question */}
+                      {questionError && questionError.failedIndex === currentQuestionIndex && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-xl"
+                        >
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          {questionError.message}
+                        </motion.div>
+                      )}
+
                       <Input
                         autoFocus
                         placeholder="أدخل إجابتك هنا..."
-                        className="h-14 text-center text-lg bg-background"
+                        className={`h-14 text-center text-lg bg-background ${
+                          questionError?.failedIndex === currentQuestionIndex
+                            ? "border-destructive focus-visible:ring-destructive"
+                            : ""
+                        }`}
                         value={answers[questions[currentQuestionIndex].id] || ""}
-                        onChange={(e) => setAnswers(prev => ({ ...prev, [questions[currentQuestionIndex].id]: e.target.value }))}
-                        onKeyDown={(e) => e.key === "Enter" && handleNextQuestion()}
+                        onChange={e => {
+                          setAnswers(prev => ({ ...prev, [questions[currentQuestionIndex].id]: e.target.value }));
+                          if (questionError?.failedIndex === currentQuestionIndex) setQuestionError(null);
+                        }}
                       />
 
-                      <Button variant="royal" className="w-full h-14 text-lg" onClick={handleNextQuestion}>
-                        التالي ←
-                      </Button>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="text-center space-y-6"
-                    >
-                      <div className="w-20 h-20 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center mx-auto border border-green-500/20">
-                        <Unlock className="w-10 h-10" />
-                      </div>
-                      <h3 className="font-display text-2xl">أجبت على جميع الأسئلة</h3>
-                      <p className="text-muted-foreground">يمكنك الآن فض الختم وقراءة الرسالة.</p>
+                      {/* Show completed previous questions */}
+                      {currentQuestionIndex > 0 && (
+                        <div className="space-y-1">
+                          {questions.slice(0, currentQuestionIndex).map((q, i) => (
+                            <div key={q.id} className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                              <span>السؤال {i + 1}: أُجيب ✓</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <Button
+                        type="submit"
                         variant="royal"
                         className="w-full h-14 text-lg"
-                        onClick={handleUnlock}
-                        disabled={unlockMutation.isPending}
+                        disabled={submitting}
                       >
-                        {unlockMutation.isPending
-                          ? <span className="flex items-center gap-2"><Loader2 className="animate-spin w-5 h-5" /> جارٍ الفتح...</span>
-                          : "فض الختم وافتح الرسالة"}
+                        {submitting ? (
+                          <span className="flex items-center gap-2">
+                            <Loader2 className="animate-spin w-5 h-5" /> جارٍ التحقق...
+                          </span>
+                        ) : isLastQuestion ? "فض الختم وافتح الرسالة" : "التالي ←"}
                       </Button>
-                    </motion.div>
-                  )}
+                    </motion.form>
+                  </AnimatePresence>
                 </div>
               ) : (
                 <div className="text-center mt-12">
                   <Button
                     variant="royal"
                     className="h-16 px-12 text-xl rounded-full shadow-2xl"
-                    onClick={handleUnlock}
+                    onClick={() => unlockMutation.mutateAsync({ token, data: { answers: [] } }).then(setUnlockedData)}
                     disabled={unlockMutation.isPending}
                   >
                     {unlockMutation.isPending
@@ -232,18 +270,11 @@ export default function LetterView() {
                   <div className="flex justify-center mb-8">
                     <WaxSeal className="w-20 h-20 drop-shadow-md" />
                   </div>
-
                   <div className="text-center mb-10">
-                    <h1 className="font-display text-4xl md:text-5xl text-[#2C1810] mb-3">
-                      {unlockedData.letter.title}
-                    </h1>
-                    <p className="font-sans text-xl text-[#5a4231]">
-                      إلى السيد/ة: <strong>{unlockedData.letter.recipientName}</strong>
-                    </p>
+                    <h1 className="font-display text-4xl md:text-5xl text-[#2C1810] mb-3">{unlockedData.letter.title}</h1>
+                    <p className="text-xl text-[#5a4231]">إلى السيد/ة: <strong>{unlockedData.letter.recipientName}</strong></p>
                   </div>
-
                   <ArabesqueDivider className="mb-12" />
-
                   <div
                     className="font-script text-[26px] md:text-[30px] leading-[2.6] text-[#2C1810] whitespace-pre-wrap px-2 md:px-8"
                     dir={unlockedData.letter.language === "english" ? "ltr" : "rtl"}
@@ -251,10 +282,8 @@ export default function LetterView() {
                   >
                     {unlockedData.letter.body}
                   </div>
-
                   <ArabesqueDivider className="mt-14 mb-8" />
-
-                  <p className="text-right text-sm text-[#8b7355] font-sans">
+                  <p className="text-right text-sm text-[#8b7355]">
                     صدرت في: {format(new Date(unlockedData.letter.createdAt), "d MMMM yyyy", { locale: ar })}
                   </p>
                 </div>
@@ -272,7 +301,7 @@ export default function LetterView() {
                     <MessageSquare className="w-5 h-5 text-primary" /> المراسلات
                   </h3>
                   {replies.map((reply: any) => {
-                    const isAdminReply = reply.replyFrom === "__admin__" || reply.isAdmin;
+                    const isAdminReply = reply.replyFrom === "__admin__";
                     return (
                       <motion.div
                         key={reply.id}
@@ -284,7 +313,7 @@ export default function LetterView() {
                           {isAdminReply ? <Crown className="w-4 h-4" /> : <User className="w-4 h-4" />}
                         </div>
                         <div className={`max-w-sm flex flex-col ${isAdminReply ? "items-end" : "items-start"}`}>
-                          <div className={`px-4 py-3 rounded-2xl font-script text-lg leading-relaxed ${isAdminReply ? "bg-primary/10 border border-primary/20 rounded-tr-sm text-[#2C1810]" : "bg-muted/60 border border-border/50 rounded-tl-sm"}`}>
+                          <div className={`px-4 py-3 rounded-2xl font-script text-lg leading-relaxed ${isAdminReply ? "bg-primary/10 border border-primary/20 rounded-tr-sm" : "bg-muted/60 border border-border/50 rounded-tl-sm"}`}>
                             <p className="text-xs font-sans font-semibold text-muted-foreground mb-1">
                               {isAdminReply ? "أحمد" : reply.replyFrom}
                             </p>
@@ -313,33 +342,23 @@ export default function LetterView() {
                       <Send className="w-5 h-5 text-primary" /> أرسل رداً
                     </h3>
                     <div className="space-y-5">
-                      <div className="space-y-2">
-                        <label className="text-sm font-semibold font-sans">اسمك الكريم</label>
-                        <Input
-                          placeholder="أدخل اسمك..."
-                          className="bg-background h-12"
-                          value={replyFrom}
-                          onChange={e => setReplyFrom(e.target.value)}
-                        />
+                      <div>
+                        <label className="text-sm font-semibold block mb-1.5">اسمك الكريم</label>
+                        <Input placeholder="أدخل اسمك..." className="bg-background h-12" value={replyFrom} onChange={e => setReplyFrom(e.target.value)} />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-semibold font-sans">رسالتك</label>
-                        <Textarea
-                          placeholder="اكتب ردك هنا..."
-                          className="bg-background min-h-[140px] font-script text-xl leading-loose"
-                          value={replyBody}
-                          onChange={e => setReplyBody(e.target.value)}
-                        />
+                      <div>
+                        <label className="text-sm font-semibold block mb-1.5">رسالتك</label>
+                        <Textarea placeholder="اكتب ردك هنا..." className="bg-background min-h-[140px] font-script text-xl leading-loose" value={replyBody} onChange={e => setReplyBody(e.target.value)} />
                       </div>
                       <Button
                         variant="royal"
-                        className="w-full h-12 text-base"
+                        className="w-full h-12"
                         onClick={handleReply}
                         disabled={replyMutation.isPending || !replyBody.trim() || !replyFrom.trim()}
                       >
                         {replyMutation.isPending
                           ? <span className="flex items-center gap-2"><Loader2 className="animate-spin w-4 h-4" />جارٍ الإرسال...</span>
-                          : <><Send className="w-4 h-4 me-2" /> إرسال الرد</>}
+                          : <><Send className="w-4 h-4 me-2" />إرسال الرد</>}
                       </Button>
                     </div>
                   </div>
@@ -353,7 +372,7 @@ export default function LetterView() {
                       <Send className="w-8 h-8" />
                     </div>
                     <h3 className="font-display text-2xl text-green-800 mb-2">تم إرسال ردك بنجاح</h3>
-                    <p className="text-green-700/80 font-sans">شكراً لك، وصلنا ردك إلى الديوان.</p>
+                    <p className="text-green-700/80">شكراً لك، وصلنا ردك إلى الديوان.</p>
                   </motion.div>
                 )}
               </motion.div>

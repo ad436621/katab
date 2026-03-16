@@ -4,10 +4,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { ShieldCheck, Lock, KeyRound, ChevronLeft } from "lucide-react";
+import { Lock, KeyRound, ChevronLeft, AlertCircle } from "lucide-react";
 import { WaxSeal } from "@/components/WaxSeal";
 
 type Step = "credentials" | "security";
+
+interface FieldError {
+  field: "username" | "password" | "q1" | "q2" | "general";
+  message: string;
+}
 
 export default function Login() {
   const [step, setStep] = useState<Step>("credentials");
@@ -15,9 +20,9 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [securityAnswer1, setSecurityAnswer1] = useState("");
   const [securityAnswer2, setSecurityAnswer2] = useState("");
-  const [q1, setQ1] = useState("ما هو اسم والدتك قبل الزواج؟");
-  const [q2, setQ2] = useState("ما هو اسم مدرستك الابتدائية؟");
-  const [error, setError] = useState("");
+  const [q1, setQ1] = useState("");
+  const [q2, setQ2] = useState("");
+  const [fieldError, setFieldError] = useState<FieldError | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [, setLocation] = useLocation();
 
@@ -33,20 +38,27 @@ export default function Login() {
 
   const handleCredentials = (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    if (!username.trim() || !password.trim()) {
-      setError("يرجى إدخال اسم المستخدم وكلمة المرور");
+    setFieldError(null);
+    if (!username.trim()) {
+      setFieldError({ field: "username", message: "يرجى إدخال اسم المستخدم" });
       return;
     }
-    // Always go to security questions step
+    if (!password.trim()) {
+      setFieldError({ field: "password", message: "يرجى إدخال كلمة المرور" });
+      return;
+    }
     setStep("security");
   };
 
   const handleSecurityStep = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    if (!securityAnswer1.trim() || !securityAnswer2.trim()) {
-      setError("يرجى الإجابة على جميع الأسئلة");
+    setFieldError(null);
+    if (q1 && !securityAnswer1.trim()) {
+      setFieldError({ field: "q1", message: "يرجى الإجابة على السؤال الأول" });
+      return;
+    }
+    if (q2 && !securityAnswer2.trim()) {
+      setFieldError({ field: "q2", message: "يرجى الإجابة على السؤال الثاني" });
       return;
     }
     setIsLoading(true);
@@ -61,21 +73,51 @@ export default function Login() {
 
       if (res.ok && data.authenticated) {
         setLocation("/dashboard");
+        return;
+      }
+
+      // Map server error to specific field
+      if (data.error === "wrong_username") {
+        setStep("credentials");
+        setFieldError({ field: "username", message: "اسم المستخدم غير صحيح" });
+      } else if (data.error === "wrong_password") {
+        setStep("credentials");
+        setFieldError({ field: "password", message: "كلمة المرور غير صحيحة" });
+      } else if (data.error === "wrong_security_answer") {
+        if (data.which === 1) {
+          setSecurityAnswer1("");
+          setFieldError({ field: "q1", message: "إجابة السؤال الأول غير صحيحة" });
+        } else {
+          setSecurityAnswer2("");
+          setFieldError({ field: "q2", message: "إجابة السؤال الثاني غير صحيحة" });
+        }
+      } else if (data.error === "too_many_attempts") {
+        setStep("credentials");
+        setFieldError({ field: "general", message: data.message });
       } else {
-        setError(data.message || "إجابة غير صحيحة");
-        setSecurityAnswer1("");
-        setSecurityAnswer2("");
+        setFieldError({ field: "general", message: data.message || "حدث خطأ، حاول مجدداً" });
       }
     } catch {
-      setError("حدث خطأ في الاتصال بالخادم");
+      setFieldError({ field: "general", message: "تعذّر الاتصال بالخادم" });
     } finally {
       setIsLoading(false);
     }
   };
 
+  const errorBox = (field: FieldError["field"]) =>
+    fieldError?.field === field ? (
+      <motion.div
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center gap-2 mt-1.5 text-destructive text-sm font-medium"
+      >
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        {fieldError.message}
+      </motion.div>
+    ) : null;
+
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center relative p-4 overflow-hidden">
-      {/* Background pattern */}
       <div className="absolute inset-0 bg-parchment-pattern opacity-30 mix-blend-multiply pointer-events-none" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(201,168,76,0.08)_0%,transparent_70%)] pointer-events-none" />
 
@@ -94,6 +136,13 @@ export default function Login() {
         <Card className="border-[#C9A84C]/30 shadow-2xl bg-card/90 backdrop-blur-xl rounded-3xl overflow-hidden royal-shadow">
           <div className="h-1.5 w-full royal-gradient" />
 
+          {fieldError?.field === "general" && (
+            <div className="mx-6 mt-5 p-3 rounded-xl bg-destructive/10 text-destructive text-sm text-center font-medium border border-destructive/20 flex items-center gap-2 justify-center">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {fieldError.message}
+            </div>
+          )}
+
           <AnimatePresence mode="wait">
             {step === "credentials" && (
               <motion.div
@@ -101,7 +150,7 @@ export default function Login() {
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.35 }}
+                transition={{ duration: 0.3 }}
               >
                 <CardHeader className="text-center pt-8 pb-4">
                   <div className="mx-auto w-14 h-14 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-3 border border-primary/20">
@@ -111,42 +160,33 @@ export default function Login() {
                   <CardDescription>أدخل اسم المستخدم وكلمة المرور</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <form onSubmit={handleCredentials} className="space-y-5 pb-6">
-                    {error && (
-                      <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm text-center font-medium border border-destructive/20">
-                        {error}
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <label className="text-sm font-semibold text-foreground/80">اسم المستخدم</label>
+                  <form onSubmit={handleCredentials} className="space-y-4 pb-6">
+                    <div>
+                      <label className="text-sm font-semibold text-foreground/80 block mb-1.5">اسم المستخدم</label>
                       <Input
                         placeholder="أدخل اسم المستخدم"
                         value={username}
-                        onChange={(e) => setUsername(e.target.value)}
+                        onChange={e => { setUsername(e.target.value); setFieldError(null); }}
                         autoComplete="username"
-                        className="h-12"
+                        className={`h-12 ${fieldError?.field === "username" ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                        autoFocus
                       />
+                      {errorBox("username")}
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-semibold text-foreground/80">كلمة المرور</label>
+                    <div>
+                      <label className="text-sm font-semibold text-foreground/80 block mb-1.5">كلمة المرور</label>
                       <Input
                         type="password"
                         placeholder="••••••••"
                         value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        onChange={e => { setPassword(e.target.value); setFieldError(null); }}
                         autoComplete="current-password"
-                        className="h-12"
+                        className={`h-12 ${fieldError?.field === "password" ? "border-destructive focus-visible:ring-destructive" : ""}`}
                       />
+                      {errorBox("password")}
                     </div>
-                    <Button
-                      type="submit"
-                      variant="royal"
-                      className="w-full h-12 text-base"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <span className="flex items-center gap-2"><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/></svg>جارٍ التحقق...</span>
-                      ) : "المتابعة"}
+                    <Button type="submit" variant="royal" className="w-full h-12 text-base mt-2">
+                      المتابعة ←
                     </Button>
                   </form>
                 </CardContent>
@@ -159,7 +199,7 @@ export default function Login() {
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.35 }}
+                transition={{ duration: 0.3 }}
               >
                 <CardHeader className="text-center pt-8 pb-4">
                   <div className="mx-auto w-14 h-14 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-3 border border-primary/20">
@@ -169,37 +209,38 @@ export default function Login() {
                   <CardDescription>أجب على أسئلة الأمان للتحقق من هويتك</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <form onSubmit={handleSecurityStep} className="space-y-5 pb-6">
-                    {error && (
-                      <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm text-center font-medium border border-destructive/20">
-                        {error}
+                  <form onSubmit={handleSecurityStep} className="space-y-4 pb-6">
+                    {q1 && (
+                      <div>
+                        <label className="text-sm font-semibold text-foreground/80 block mb-1.5">{q1}</label>
+                        <Input
+                          placeholder="إجابتك هنا..."
+                          value={securityAnswer1}
+                          onChange={e => { setSecurityAnswer1(e.target.value); setFieldError(null); }}
+                          className={`h-12 ${fieldError?.field === "q1" ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                          autoFocus
+                        />
+                        {errorBox("q1")}
                       </div>
                     )}
-                    <div className="space-y-2">
-                      <label className="text-sm font-semibold text-foreground/80">{q1}</label>
-                      <Input
-                        placeholder="إجابتك هنا..."
-                        value={securityAnswer1}
-                        onChange={(e) => setSecurityAnswer1(e.target.value)}
-                        className="h-12"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-semibold text-foreground/80">{q2}</label>
-                      <Input
-                        placeholder="إجابتك هنا..."
-                        value={securityAnswer2}
-                        onChange={(e) => setSecurityAnswer2(e.target.value)}
-                        className="h-12"
-                      />
-                    </div>
-                    <div className="flex gap-3">
+                    {q2 && (
+                      <div>
+                        <label className="text-sm font-semibold text-foreground/80 block mb-1.5">{q2}</label>
+                        <Input
+                          placeholder="إجابتك هنا..."
+                          value={securityAnswer2}
+                          onChange={e => { setSecurityAnswer2(e.target.value); setFieldError(null); }}
+                          className={`h-12 ${fieldError?.field === "q2" ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                        />
+                        {errorBox("q2")}
+                      </div>
+                    )}
+                    <div className="flex gap-3 pt-1">
                       <Button
                         type="button"
                         variant="outline"
                         className="flex-1 h-12"
-                        onClick={() => { setStep("credentials"); setError(""); }}
+                        onClick={() => { setStep("credentials"); setFieldError(null); }}
                       >
                         <ChevronLeft className="w-4 h-4 me-1" /> رجوع
                       </Button>
@@ -210,7 +251,13 @@ export default function Login() {
                         disabled={isLoading}
                       >
                         {isLoading ? (
-                          <span className="flex items-center gap-2"><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/></svg>تحقق...</span>
+                          <span className="flex items-center gap-2">
+                            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
+                              <path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor" className="opacity-75"/>
+                            </svg>
+                            جارٍ التحقق...
+                          </span>
                         ) : "دخول الديوان"}
                       </Button>
                     </div>

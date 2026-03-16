@@ -101,15 +101,19 @@ router.post("/:token/unlock", async (req, res) => {
       .orderBy(questionsTable.orderIndex);
 
     if (questions.length > 0) {
-      for (const question of questions) {
+      for (let i = 0; i < questions.length; i++) {
+        const question = questions[i];
         const userAnswer = answers.find((a: any) => a.questionId === question.id);
         if (!userAnswer) {
-          return res.status(403).json({ error: "wrong_answers", message: "إجابة خاطئة أو ناقصة" });
+          return res.status(403).json({
+            error: "wrong_answers",
+            failedIndex: i,
+            message: `إجابة السؤال ${i + 1} غير موجودة`,
+          });
         }
         const normalizedInput = userAnswer.answer?.toLowerCase().trim() || "";
         const storedHash = question.answerText;
 
-        // Support both bcrypt hashes (new) and plain text (legacy pre-encryption rows)
         let match = false;
         if (storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$")) {
           match = await bcrypt.compare(normalizedInput, storedHash);
@@ -118,7 +122,11 @@ router.post("/:token/unlock", async (req, res) => {
         }
 
         if (!match) {
-          return res.status(403).json({ error: "wrong_answers", message: "إجابة خاطئة، حاول مرة أخرى" });
+          return res.status(403).json({
+            error: "wrong_answers",
+            failedIndex: i,
+            message: `إجابة السؤال ${i + 1} غير صحيحة`,
+          });
         }
       }
     }

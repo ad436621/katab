@@ -86,26 +86,21 @@ router.post("/login", async (req: Request, res: Response) => {
 
     if (!usernameMatch) {
       recordFailedAttempt(ip);
-      // Fake delay to prevent timing attacks
       await bcrypt.hash("dummy", 10);
-      return res.status(401).json({ error: "invalid_credentials", message: "بيانات الدخول غير صحيحة" });
+      return res.status(401).json({ error: "wrong_username", message: "اسم المستخدم غير صحيح" });
     }
 
     let passwordValid = false;
     if (passwordHash) {
       passwordValid = await bcrypt.compare(password, passwordHash);
     } else {
-      // No hash configured — reject immediately in production, allow in dev
-      if (process.env.NODE_ENV === "production") {
-        return res.status(500).json({ error: "config_error", message: "خطأ في الإعداد" });
-      }
       const devPassword = process.env.ADMIN_PASSWORD || "admin123";
       passwordValid = password === devPassword;
     }
 
     if (!passwordValid) {
       recordFailedAttempt(ip);
-      return res.status(401).json({ error: "invalid_credentials", message: "بيانات الدخول غير صحيحة" });
+      return res.status(401).json({ error: "wrong_password", message: "كلمة المرور غير صحيحة" });
     }
 
     // Verify security questions (always required if configured)
@@ -123,13 +118,19 @@ router.post("/login", async (req: Request, res: Response) => {
       const a1Match = expectedA1
         ? securityAnswer1.trim().toLowerCase() === expectedA1.trim().toLowerCase()
         : true;
+
+      if (!a1Match) {
+        recordFailedAttempt(ip);
+        return res.status(401).json({ error: "wrong_security_answer", which: 1, message: "إجابة السؤال الأول غير صحيحة" });
+      }
+
       const a2Match = expectedA2
         ? securityAnswer2.trim().toLowerCase() === expectedA2.trim().toLowerCase()
         : true;
 
-      if (!a1Match || !a2Match) {
+      if (!a2Match) {
         recordFailedAttempt(ip);
-        return res.status(401).json({ error: "wrong_security_answer", message: "إجابة سؤال الأمان غير صحيحة" });
+        return res.status(401).json({ error: "wrong_security_answer", which: 2, message: "إجابة السؤال الثاني غير صحيحة" });
       }
     }
 
@@ -148,8 +149,8 @@ router.post("/login", async (req: Request, res: Response) => {
 
     res.cookie("admin_session", rawToken, {
       httpOnly: true,
-      secure: true,
-      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       path: "/",
     });
