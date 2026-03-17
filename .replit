@@ -57,3 +57,15 @@ ADMIN_PASSWORD_HASH = "$2b$12$q67RNG41vgoXL7fxIdRsLOmy4pxP8Uxl3HHq9wx.HLw5fXi3Vk
 
 [nix]
 channel = "stable-25_05"
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 21891
+externalPort = 80
