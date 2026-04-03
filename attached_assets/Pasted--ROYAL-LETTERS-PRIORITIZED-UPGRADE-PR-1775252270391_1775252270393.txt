@@ -1,0 +1,271 @@
+===========================================================
+ ROYAL LETTERS — PRIORITIZED UPGRADE PROMPT
+ Implement phases IN ORDER. Stop after any phase if needed.
+ Each phase is fully self-contained and shippable.
+===========================================================
+
+Read the ENTIRE codebase before writing any code.
+Do NOT leave TODOs or partial implementations within a phase.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 1 — CRITICAL (Do this first, highest value)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── 1A. LOGIN SECURITY QUESTIONS MANAGEMENT ───────────────
+
+The admin must be able to update the security questions used
+during the two-step login flow, from the /settings page.
+
+Add a "Login Security Questions" section to /settings with:
+  - 3 question text inputs (pre-filled with current values)
+  - 3 answer inputs (password type, always empty — never pre-fill)
+  - Helper note per answer: "Leave blank to keep current answer"
+  - One "Save Security Questions" button
+
+Backend — PUT /api/auth/settings must accept:
+  { securityQ1?, securityA1?, securityQ2?, securityA2?,
+    securityQ3?, securityA3? }
+  - Skip any field that is absent or empty string
+  - Normalize answers: trim + lowercase before bcrypt hash (cost 12)
+  - Store questions AES-256-GCM encrypted in admin_config table
+  - Return { success: true }
+
+Login route POST /api/auth/login must read questions and
+answer hashes from admin_config in DB only — not from env vars.
+Env vars are used only to seed the DB on first run if empty.
+
+── 1B. BRUTE-FORCE PROTECTION ON LOGIN ───────────────────
+
+Track failed login attempts per IP in a server-side Map:
+  - 5 failures within 15 minutes → lock that IP for 15 minutes
+  - Return HTTP 429: "Too many failed attempts. Try again in X minutes."
+  - Reset counter on successful login
+Apply as middleware only on POST /api/auth/login.
+
+── 1C. ERROR HANDLING & LOADING STATES ───────────────────
+
+Every API call in the frontend must handle three states:
+  Loading → spinner or skeleton, never a blank screen
+  Error   → friendly error card with a "Try again" button
+  Empty   → meaningful empty state with a call to action
+
+Add a consistent toast system (use sonner or react-hot-toast):
+  - Success toast: green (e.g. "Letter saved", "Settings updated")
+  - Error toast:   red   (e.g. "Something went wrong. Try again.")
+  - Info toast:    blue  (e.g. "Link copied!", "Draft restored")
+
+All forms must show inline validation errors below each field
+(not just a generic top-level toast). Errors appear on field
+blur and on submit attempt. Fields with errors get a red border.
+
+── 1D. ENVIRONMENT VALIDATION ON STARTUP ─────────────────
+
+At server startup, before app.listen(), validate:
+  ENCRYPTION_KEY must be exactly 64 hex characters
+  DATABASE_URL must be set
+  VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_EMAIL must be set
+
+If any are missing or malformed: log a clear descriptive error
+and call process.exit(1). Never start with broken config.
+
+── 1E. GLOBAL ERROR HANDLER IN EXPRESS ───────────────────
+
+Add this middleware as the last app.use() in the server:
+  app.use((err, req, res, next) => {
+    console.error('[ERROR]', err.stack || err.message);
+    res.status(err.status || 500).json({
+      error: err.message || 'Internal server error'
+    });
+  });
+Wrap every async route handler in try/catch that calls next(err).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 1 CHECKLIST — verify before moving to Phase 2
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] /settings has editable Q&A section with save button
+ [ ] Blank answer = keep existing hash, provided answer = re-hash
+ [ ] Login reads Q&A from DB, not env vars
+ [ ] 5 wrong logins = 15-min IP lockout with 429 response
+ [ ] All pages show loading / error / empty states
+ [ ] Toast system in place for all mutations
+ [ ] Inline field validation errors on all forms
+ [ ] Startup exits cleanly if env vars missing/invalid
+ [ ] Global Express error handler catches all unhandled errors
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 2 — IMPORTANT (Do if Phase 1 is done and credits allow)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── 2A. IN-APP NOTIFICATION BELL ──────────────────────────
+
+Add a new DB table (run migration):
+  admin_notifications:
+    id         SERIAL PRIMARY KEY
+    type       TEXT NOT NULL  -- 'new_reply' | 'letter_read' | 'message_unlocked'
+    letterId   INTEGER REFERENCES letters(id) ON DELETE CASCADE
+    message    TEXT NOT NULL  -- encrypted, human-readable
+    isRead     BOOLEAN DEFAULT false
+    createdAt  TIMESTAMP DEFAULT NOW()
+
+Create these notifications automatically on the server when:
+  - A recipient submits a reply → type: 'new_reply'
+  - A letter is read (unlocked via security questions) → type: 'letter_read'
+  - A scheduled message unlocks → type: 'message_unlocked'
+
+Backend routes (admin only):
+  GET  /api/notifications          → last 50, ordered by createdAt DESC
+  PUT  /api/notifications/read-all → mark all isRead = true
+  PUT  /api/notifications/:id/read → mark one as read
+
+Frontend — bell icon in AdminLayout header (top-right):
+  - Red badge showing unread count (hidden if zero)
+  - Clicking opens a dropdown panel (max-height 400px, scrollable)
+  - Each item: icon + decrypted message + relative time ("2 min ago")
+  - "Mark all as read" button at top of panel
+  - Clicking an item navigates to /letters/:letterId and marks it read
+  - Panel closes on outside click
+  - Poll GET /api/notifications every 30 seconds while admin is logged in
+
+── 2B. DASHBOARD IMPROVEMENTS ────────────────────────────
+
+Status badges — add visual badge to each letter card/row:
+  DRAFT      → grey
+  SENT       → blue
+  READ       → green
+  REPLIED    → gold (matches site theme)
+  SCHEDULED  → purple with clock icon
+  LOCKED     → orange with lock icon (scheduled, not yet unlocked)
+
+Stats bar at top (responsive: 2×2 on mobile, 4×1 on desktop):
+  Total Letters | Unread | Replied | Scheduled/Locked
+
+Filter toolbar above the list:
+  - Status dropdown: All / Draft / Sent / Read / Replied / Scheduled
+  - Sort dropdown: Newest / Oldest / Recipient A–Z / Recently Read
+  Client-side filtering of already-fetched data (no extra API calls).
+
+Copy shareable link button on each letter card/row:
+  Copies the recipient URL to clipboard.
+  Shows "Copied!" tooltip for 2 seconds, then reverts.
+
+Inline delete confirmation (no window.confirm):
+  Show "Are you sure? This cannot be undone." inline with
+  "Yes, Delete" and "Cancel" buttons. Only then call the API.
+
+── 2C. COMPOSE UX IMPROVEMENTS ───────────────────────────
+
+Live character count below the body textarea:
+  Normal color up to 5,000 chars.
+  Amber at 5,001–10,000 with note "Long letter — may be hard to read on mobile."
+  Red above 10,000.
+
+Recipient name autocomplete:
+  New backend endpoint: GET /api/letters/recipient-suggestions
+    Returns up to 5 distinct decrypted recipient names from DB.
+  As admin types in recipient field, show matching dropdown suggestions.
+  Clicking a suggestion fills the field.
+
+Dynamic unlock summary below the datetime picker (gold color):
+  < 24 hours  → "This letter unlocks in X hours and Y minutes"
+  < 7 days    → "This letter unlocks in X days and Y hours"
+  >= 7 days   → "This letter unlocks on Monday, June 23, 2025 at 9:00 AM"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 2 CHECKLIST — verify before moving to Phase 3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] admin_notifications table created and migrated
+ [ ] Notification created on: reply / read / unlock
+ [ ] Bell icon with unread badge in header
+ [ ] Dropdown panel with mark-all-read and navigation
+ [ ] 30-second polling while admin is logged in
+ [ ] 6 status badges on dashboard
+ [ ] Stats bar (4 cards) at top of dashboard
+ [ ] Filter + sort dropdowns working client-side
+ [ ] Copy link with "Copied!" tooltip
+ [ ] Inline delete confirmation
+ [ ] Character count with color thresholds
+ [ ] Recipient autocomplete from past letters
+ [ ] Dynamic human-readable scheduled unlock summary
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 3 — NICE TO HAVE (Only if credits are comfortable)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── 3A. LETTER PREVIEW MODAL IN COMPOSE ───────────────────
+
+Add a "Preview" button next to the submit button in Compose.
+Opens a full-screen modal showing the letter exactly as the
+recipient will see it: parchment background, royal fonts,
+body text, attached image + caption, wax seal decoration.
+Security questions are NOT shown (recipient fills those).
+"Close Preview" button fixed at top-right. Read-only.
+Full-screen on mobile (width: 100vw, height: 100vh, scrollable).
+
+── 3B. AUTO-SAVE DRAFT IN COMPOSE ────────────────────────
+
+Auto-save to localStorage every 30 seconds AND debounced
+2 seconds after last keystroke on new letter compose only.
+
+Save: title, body, recipientName, language, questions array,
+imageCaption, scheduledUnlockAt state.
+Do NOT save imageData (too large for localStorage).
+
+On next visit to /compose (new), show a banner:
+  "You have an unsaved draft from [relative time]. Restore it?"
+  "Restore Draft" | "Discard" buttons.
+
+Clear draft on: successful submit, "Discard" click,
+or navigating to /compose/:id (edit mode uses DB).
+Storage key: "royal_letter_draft"
+
+── 3C. SESSION MANAGEMENT IN SETTINGS ────────────────────
+
+Show in /settings:
+  - Current session created-at timestamp (formatted)
+  - "Log out all sessions" button → deletes all rows from
+    admin_sessions table → redirects to /login
+
+If session expires within 30 minutes, show a dismissible
+warning banner at top of every admin page:
+  "Your session expires soon. Click here to extend."
+Clicking calls POST /api/auth/refresh-session which resets
+the session expiry to 7 days from now.
+
+── 3D. RECIPIENT REPLY IMPROVEMENTS ──────────────────────
+
+Reply textarea: min 10 chars to activate submit button.
+Hard limit 2,000 chars — show counter "1,450 / 2,000".
+After successful reply, hide the form and show a thank-you
+card on the parchment with a wax seal and warm message in
+Arabic (and English if letter language is English).
+The form cannot be re-submitted (persist this state in
+sessionStorage so a page refresh keeps the thank-you screen).
+
+── 3E. CLIENT-SIDE IMAGE COMPRESSION ─────────────────────
+
+Before converting uploaded image to base64 for storage,
+compress it client-side using the Canvas API:
+  - Resize to max 1600px on longest side (preserve aspect ratio)
+  - Re-encode as JPEG at quality 0.82 (except PNG — keep as PNG)
+  - Show "Compressing..." spinner while processing
+  - Show before/after file size (e.g. "4.2 MB → 890 KB")
+This reduces DB storage and speeds up letter load times.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 3 CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] Preview modal matches recipient parchment view exactly
+ [ ] Draft auto-saves every 30s + restore banner on return
+ [ ] Draft clears on submit/discard/edit-mode
+ [ ] Session info shown in /settings with log-out-all button
+ [ ] Session expiry warning banner + extend endpoint
+ [ ] Reply: min 10 chars, max 2000 with counter
+ [ ] Thank-you card after reply (persisted in sessionStorage)
+ [ ] Image compressed client-side before upload
+ [ ] Before/after size shown to admin
+
+===========================================================
+ STOP AFTER EACH PHASE CHECKLIST IS COMPLETE.
+ Do not start the next phase without finishing the current one.
+ Do NOT ask clarifying questions. Start with Phase 1 now.
+===========================================================

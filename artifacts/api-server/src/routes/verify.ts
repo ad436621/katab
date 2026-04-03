@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { lettersTable, questionsTable, repliesTable } from "@workspace/db/schema";
+import { lettersTable, questionsTable, repliesTable, adminNotificationsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { safeDecrypt } from "../crypto.js";
+import { encrypt, safeDecrypt } from "../crypto.js";
 import * as bcrypt from "bcryptjs";
 import { sendPushToAdmins } from "./push.js";
 
@@ -24,10 +24,21 @@ function checkUnlockLimit(token: string): boolean {
   return true;
 }
 
+async function createNotification(type: string, letterId: string, message: string) {
+  try {
+    await db.insert(adminNotificationsTable).values({
+      type,
+      letterId,
+      message: encrypt(message),
+    });
+  } catch (err) {
+    console.error("createNotification error:", err);
+  }
+}
+
 router.get("/:token", async (req, res) => {
   try {
     const { token } = req.params;
-
     const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
     const letter = letters[0];
 
@@ -119,13 +130,17 @@ router.post("/:token/unlock", async (req, res) => {
     }
 
     const wasRead = letter.isRead;
-
     if (!letter.isRead) {
-      await db.update(lettersTable).set({ isRead: true, readAt: now, status: "read", updatedAt: now }).where(eq(lettersTable.id, letter.id));
+      await db.update(lettersTable)
+        .set({ isRead: true, readAt: now, status: "read", updatedAt: now })
+        .where(eq(lettersTable.id, letter.id));
 
+      const letterTitle = safeDecrypt(letter.title);
+      const notifMessage = `قرأ المستلم رسالة: "${letterTitle}"`;
+      createNotification("letter_read", letter.id, notifMessage);
       sendPushToAdmins({
         title: "✉️ تمت قراءة رسالة",
-        body: `قرأ المستلم رسالة: ${safeDecrypt(letter.title)}`,
+        body: notifMessage,
         url: `/letters/${letter.id}`,
       }).catch(() => {});
     }

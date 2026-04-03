@@ -6,6 +6,7 @@ import verifyRouter from "./verify.js";
 import repliesRouter from "./replies.js";
 import settingsRouter from "./settings.js";
 import pushRouter from "./push.js";
+import notificationsRouter from "./notifications.js";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use("/letters", lettersRouter);
 router.use("/verify", verifyRouter);
 router.use("/replies", repliesRouter);
 router.use("/push", pushRouter);
+router.use("/notifications", notificationsRouter);
 
 export default router;

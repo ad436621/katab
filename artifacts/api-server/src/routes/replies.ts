@@ -1,12 +1,24 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { lettersTable, repliesTable } from "@workspace/db/schema";
+import { lettersTable, repliesTable, adminNotificationsTable } from "@workspace/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
 import { encrypt, safeDecrypt } from "../crypto.js";
 import { sendPushToAdmins, sendPushToToken } from "./push.js";
 
 const router = Router();
+
+async function createNotification(type: string, letterId: string, message: string) {
+  try {
+    await db.insert(adminNotificationsTable).values({
+      type,
+      letterId,
+      message: encrypt(message),
+    });
+  } catch (err) {
+    console.error("createNotification error:", err);
+  }
+}
 
 router.post("/", async (req, res) => {
   try {
@@ -16,25 +28,15 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "missing_fields", message: "جميع الحقول مطلوبة" });
     }
 
-    // Limit reply length
     if (replyBody.length > 5000) {
-      return res.status(400).json({ error: "too_long", message: "الرد طويل جداً" });
+      return res.status(400).json({ error: "too_long", message: "الرد طويل جداً (الحد الأقصى 5000 حرف)" });
     }
 
-    const letters = await db
-      .select()
-      .from(lettersTable)
-      .where(eq(lettersTable.uniqueToken, token));
-
+    const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
     const letter = letters[0];
 
-    if (!letter) {
-      return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
-    }
-
-    if (letter.status === "draft") {
-      return res.status(403).json({ error: "forbidden", message: "لا يمكن الرد على رسالة غير مرسلة" });
-    }
+    if (!letter) return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
+    if (letter.status === "draft") return res.status(403).json({ error: "forbidden", message: "لا يمكن الرد على رسالة غير مرسلة" });
 
     const [reply] = await db.insert(repliesTable).values({
       letterId: letter.id,
@@ -42,14 +44,17 @@ router.post("/", async (req, res) => {
       replyFrom: encrypt(replyFrom),
     }).returning();
 
-    await db
-      .update(lettersTable)
+    await db.update(lettersTable)
       .set({ status: "replied", updatedAt: new Date() })
       .where(eq(lettersTable.id, letter.id));
 
+    const letterTitle = safeDecrypt(letter.title);
+    const notifMessage = `${replyFrom} أرسل رداً على رسالة: "${letterTitle}"`;
+
+    createNotification("new_reply", letter.id, notifMessage);
     sendPushToAdmins({
       title: "💬 رد جديد على رسالة",
-      body: `${replyFrom} أرسل رداً على رسالة: ${safeDecrypt(letter.title)}`,
+      body: notifMessage,
       url: `/letters/${letter.id}`,
     }).catch(() => {});
 
@@ -57,8 +62,8 @@ router.post("/", async (req, res) => {
       reply: {
         id: reply.id,
         letterId: reply.letterId,
-        replyBody: replyBody,
-        replyFrom: replyFrom,
+        replyBody,
+        replyFrom,
         createdAt: reply.createdAt.toISOString(),
       },
     });
@@ -71,7 +76,6 @@ router.post("/", async (req, res) => {
 router.get("/:letterId", requireAdmin, async (req, res) => {
   try {
     const { letterId } = req.params;
-
     const replies = await db
       .select()
       .from(repliesTable)

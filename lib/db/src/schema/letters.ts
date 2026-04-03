@@ -69,6 +69,15 @@ export const pushSubscriptionsTable = pgTable("push_subscriptions", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const adminNotificationsTable = pgTable("admin_notifications", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  type: text("type").notNull(),
+  letterId: text("letter_id").references(() => lettersTable.id, { onDelete: "cascade" }),
+  message: text("message").notNull(),
+  isRead: boolean("is_read").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertLetterSchema = createInsertSchema(lettersTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertQuestionSchema = createInsertSchema(questionsTable).omit({ id: true });
 export const insertReplySchema = createInsertSchema(repliesTable).omit({ id: true, createdAt: true });

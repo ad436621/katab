@@ -297,4 +297,21 @@ router.post("/:id/admin-reply", requireAdmin, async (req, res) => {
   }
 });
 
+router.get("/recipient-suggestions", requireAdmin, async (req, res) => {
+  try {
+    const { q } = req.query;
+    const allLetters = await db.select({ recipientName: lettersTable.recipientName }).from(lettersTable);
+    const decrypted = allLetters.map(l => safeDecrypt(l.recipientName)).filter(Boolean);
+    const unique = [...new Set(decrypted)];
+    const query = (q as string || "").toLowerCase().trim();
+    const filtered = query
+      ? unique.filter(n => n.toLowerCase().includes(query))
+      : unique;
+    return res.json({ suggestions: filtered.slice(0, 5) });
+  } catch (err) {
+    console.error("Recipient suggestions error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
+});
+
 export default router;

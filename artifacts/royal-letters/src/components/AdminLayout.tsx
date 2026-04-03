@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { PenLine, Inbox, LogOut, Loader2, ShieldCheck, Settings, Menu, X } from "lucide-react";
 import { useGetAuthMe, useAdminLogout } from "@workspace/api-client-react";
 import { useEffect, useState } from "react";
+import { NotificationBell } from "@/components/NotificationBell";
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
@@ -122,9 +123,10 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           >
             <Menu className="w-5 h-5" />
           </button>
-          <h2 className="font-display text-lg md:text-xl text-foreground truncate">
+          <h2 className="font-display text-lg md:text-xl text-foreground truncate flex-1">
             {getTitle()}
           </h2>
+          <NotificationBell />
         </header>
         <div className="flex-1 overflow-auto p-4 md:p-8 relative">
           <div className="max-w-5xl mx-auto">
