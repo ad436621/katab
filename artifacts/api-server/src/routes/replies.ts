@@ -4,6 +4,7 @@ import { lettersTable, repliesTable } from "@workspace/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
 import { encrypt, safeDecrypt } from "../crypto.js";
+import { sendPushToAdmins, sendPushToToken } from "./push.js";
 
 const router = Router();
 
@@ -45,6 +46,12 @@ router.post("/", async (req, res) => {
       .update(lettersTable)
       .set({ status: "replied", updatedAt: new Date() })
       .where(eq(lettersTable.id, letter.id));
+
+    sendPushToAdmins({
+      title: "💬 رد جديد على رسالة",
+      body: `${replyFrom} أرسل رداً على رسالة: ${safeDecrypt(letter.title)}`,
+      url: `/letters/${letter.id}`,
+    }).catch(() => {});
 
     return res.status(201).json({
       reply: {

@@ -15,6 +15,9 @@ export const lettersTable = pgTable("letters", {
   readAt: timestamp("read_at"),
   language: languageEnum("language").notNull().default("arabic"),
   status: statusEnum("status").notNull().default("draft"),
+  scheduledUnlockAt: timestamp("scheduled_unlock_at"),
+  isUnlocked: boolean("is_unlocked").notNull().default(false),
+  unlockNotified: boolean("unlock_notified").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -45,11 +48,14 @@ export const adminSessionsTable = pgTable("admin_sessions", {
 export const adminConfigTable = pgTable("admin_config", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   username: text("username").notNull(),
+  displayName: text("display_name"),
   passwordHash: text("password_hash").notNull(),
   securityQ1: text("security_q1"),
   securityQ2: text("security_q2"),
+  securityQ3: text("security_q3"),
   securityA1Hash: text("security_a1_hash"),
   securityA2Hash: text("security_a2_hash"),
+  securityA3Hash: text("security_a3_hash"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
@@ -58,6 +64,8 @@ export const pushSubscriptionsTable = pgTable("push_subscriptions", {
   endpoint: text("endpoint").notNull().unique(),
   p256dh: text("p256dh").notNull(),
   auth: text("auth").notNull(),
+  letterToken: text("letter_token"),
+  isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -73,3 +81,5 @@ export type InsertQuestion = z.infer<typeof insertQuestionSchema>;
 export type Reply = typeof repliesTable.$inferSelect;
 export type InsertReply = z.infer<typeof insertReplySchema>;
 export type AdminSession = typeof adminSessionsTable.$inferSelect;
+export type AdminConfig = typeof adminConfigTable.$inferSelect;
+export type PushSubscription = typeof pushSubscriptionsTable.$inferSelect;

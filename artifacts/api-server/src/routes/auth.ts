@@ -1,17 +1,16 @@
 import { Router, Request, Response } from "express";
 import { db } from "@workspace/db";
-import { adminSessionsTable } from "@workspace/db/schema";
+import { adminSessionsTable, adminConfigTable } from "@workspace/db/schema";
 import { eq, lt } from "drizzle-orm";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
-import { hashToken } from "../crypto.js";
+import { hashToken, encrypt, safeDecrypt } from "../crypto.js";
 
 const router = Router();
 
-// In-memory rate limiter: { ip -> { count, resetAt } }
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const WINDOW_MS = 15 * 60 * 1000;
 
 function checkRateLimit(ip: string): { blocked: boolean; remaining: number } {
   const now = Date.now();
@@ -20,9 +19,7 @@ function checkRateLimit(ip: string): { blocked: boolean; remaining: number } {
     loginAttempts.set(ip, { count: 0, resetAt: now + WINDOW_MS });
     return { blocked: false, remaining: MAX_ATTEMPTS };
   }
-  if (record.count >= MAX_ATTEMPTS) {
-    return { blocked: true, remaining: 0 };
-  }
+  if (record.count >= MAX_ATTEMPTS) return { blocked: true, remaining: 0 };
   return { blocked: false, remaining: MAX_ATTEMPTS - record.count };
 }
 
@@ -48,13 +45,38 @@ async function cleanExpiredSessions() {
   await db.delete(adminSessionsTable).where(lt(adminSessionsTable.expiresAt, new Date()));
 }
 
-// Get admin security questions (public)
-router.get("/security-questions", (_req, res) => {
-  const q1 = process.env.SECURITY_Q1 || "";
-  const q2 = process.env.SECURITY_Q2 || "";
-  // Only return questions if they're configured
-  if (!q1 && !q2) return res.json({ q1: null, q2: null });
-  return res.json({ q1, q2 });
+async function getOrSeedAdminConfig() {
+  const rows = await db.select().from(adminConfigTable);
+  if (rows.length > 0) return rows[0];
+
+  const username = process.env.ADMIN_USERNAME || "ahmed";
+  const passwordHash = process.env.ADMIN_PASSWORD_HASH || "";
+
+  const [newRow] = await db.insert(adminConfigTable).values({
+    username: encrypt(username),
+    displayName: encrypt(username),
+    passwordHash,
+    securityQ1: process.env.SECURITY_Q1 ? encrypt(process.env.SECURITY_Q1) : null,
+    securityQ2: process.env.SECURITY_Q2 ? encrypt(process.env.SECURITY_Q2) : null,
+    securityQ3: null,
+    securityA1Hash: process.env.SECURITY_A1 ? await bcrypt.hash(process.env.SECURITY_A1.toLowerCase().trim(), 12) : null,
+    securityA2Hash: process.env.SECURITY_A2 ? await bcrypt.hash(process.env.SECURITY_A2.toLowerCase().trim(), 12) : null,
+    securityA3Hash: null,
+  }).returning();
+  return newRow;
+}
+
+router.get("/security-questions", async (_req, res) => {
+  try {
+    const config = await getOrSeedAdminConfig();
+    const q1 = config.securityQ1 ? safeDecrypt(config.securityQ1) : null;
+    const q2 = config.securityQ2 ? safeDecrypt(config.securityQ2) : null;
+    const q3 = config.securityQ3 ? safeDecrypt(config.securityQ3) : null;
+    return res.json({ q1, q2, q3 });
+  } catch (err) {
+    console.error("Security questions error:", err);
+    return res.status(500).json({ error: "server_error" });
+  }
 });
 
 router.post("/login", async (req: Request, res: Response) => {
@@ -62,23 +84,19 @@ router.post("/login", async (req: Request, res: Response) => {
 
   const { blocked } = checkRateLimit(ip);
   if (blocked) {
-    return res.status(429).json({
-      error: "too_many_attempts",
-      message: "محاولات كثيرة جداً، انتظر 15 دقيقة وحاول مجدداً",
-    });
+    return res.status(429).json({ error: "too_many_attempts", message: "محاولات كثيرة جداً، انتظر 15 دقيقة وحاول مجدداً" });
   }
 
   try {
-    const { username, password, securityAnswer1, securityAnswer2 } = req.body;
+    const { username, password, securityAnswer1, securityAnswer2, securityAnswer3 } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({ error: "missing_fields", message: "اسم المستخدم وكلمة المرور مطلوبان" });
     }
 
-    const expectedUsername = process.env.ADMIN_USERNAME || "ahmed";
-    const passwordHash = process.env.ADMIN_PASSWORD_HASH || "";
+    const config = await getOrSeedAdminConfig();
+    const expectedUsername = safeDecrypt(config.username);
 
-    // Constant-time username comparison
     const usernameMatch = crypto.timingSafeEqual(
       Buffer.from(username.padEnd(64)),
       Buffer.from(expectedUsername.padEnd(64))
@@ -91,8 +109,8 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     let passwordValid = false;
-    if (passwordHash) {
-      passwordValid = await bcrypt.compare(password, passwordHash);
+    if (config.passwordHash) {
+      passwordValid = await bcrypt.compare(password, config.passwordHash);
     } else {
       const devPassword = process.env.ADMIN_PASSWORD || "admin123";
       passwordValid = password === devPassword;
@@ -103,49 +121,47 @@ router.post("/login", async (req: Request, res: Response) => {
       return res.status(401).json({ error: "wrong_password", message: "كلمة المرور غير صحيحة" });
     }
 
-    // Verify security questions (always required if configured)
-    const expectedA1 = process.env.SECURITY_A1;
-    const expectedA2 = process.env.SECURITY_A2;
+    const hasSecurityQuestions = config.securityA1Hash || config.securityA2Hash || config.securityA3Hash;
 
-    if (expectedA1 || expectedA2) {
-      if (!securityAnswer1 || !securityAnswer2) {
-        return res.status(428).json({
-          error: "security_questions_required",
-          message: "يرجى الإجابة على أسئلة الأمان",
-        });
+    if (hasSecurityQuestions) {
+      const answersProvided = securityAnswer1 || securityAnswer2 || securityAnswer3;
+      if (!answersProvided) {
+        return res.status(428).json({ error: "security_questions_required", message: "يرجى الإجابة على أسئلة الأمان" });
       }
 
-      const a1Match = expectedA1
-        ? securityAnswer1.trim().toLowerCase() === expectedA1.trim().toLowerCase()
-        : true;
-
-      if (!a1Match) {
-        recordFailedAttempt(ip);
-        return res.status(401).json({ error: "wrong_security_answer", which: 1, message: "إجابة السؤال الأول غير صحيحة" });
+      if (config.securityA1Hash && securityAnswer1) {
+        const a1Match = await bcrypt.compare(securityAnswer1.trim().toLowerCase(), config.securityA1Hash);
+        if (!a1Match) {
+          recordFailedAttempt(ip);
+          return res.status(401).json({ error: "wrong_security_answer", which: 1, message: "إجابة السؤال الأول غير صحيحة" });
+        }
       }
 
-      const a2Match = expectedA2
-        ? securityAnswer2.trim().toLowerCase() === expectedA2.trim().toLowerCase()
-        : true;
+      if (config.securityA2Hash && securityAnswer2) {
+        const a2Match = await bcrypt.compare(securityAnswer2.trim().toLowerCase(), config.securityA2Hash);
+        if (!a2Match) {
+          recordFailedAttempt(ip);
+          return res.status(401).json({ error: "wrong_security_answer", which: 2, message: "إجابة السؤال الثاني غير صحيحة" });
+        }
+      }
 
-      if (!a2Match) {
-        recordFailedAttempt(ip);
-        return res.status(401).json({ error: "wrong_security_answer", which: 2, message: "إجابة السؤال الثاني غير صحيحة" });
+      if (config.securityA3Hash && securityAnswer3) {
+        const a3Match = await bcrypt.compare(securityAnswer3.trim().toLowerCase(), config.securityA3Hash);
+        if (!a3Match) {
+          recordFailedAttempt(ip);
+          return res.status(401).json({ error: "wrong_security_answer", which: 3, message: "إجابة السؤال الثالث غير صحيحة" });
+        }
       }
     }
 
-    // All checks passed — clear rate limit and create session
     clearAttempts(ip);
     await cleanExpiredSessions();
 
     const rawToken = generateToken();
-    const storedToken = hashToken(rawToken); // Store SHA-256 hash, send raw to client
+    const storedToken = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    await db.insert(adminSessionsTable).values({
-      sessionToken: storedToken,
-      expiresAt,
-    });
+    await db.insert(adminSessionsTable).values({ sessionToken: storedToken, expiresAt });
 
     res.cookie("admin_session", rawToken, {
       httpOnly: true,
@@ -155,7 +171,8 @@ router.post("/login", async (req: Request, res: Response) => {
       path: "/",
     });
 
-    return res.json({ authenticated: true, username: expectedUsername });
+    const displayName = config.displayName ? safeDecrypt(config.displayName) : expectedUsername;
+    return res.json({ authenticated: true, username: expectedUsername, displayName });
   } catch (err) {
     console.error("Login error:", err);
     return res.status(500).json({ error: "server_error", message: "خطأ في الخادم" });
@@ -180,16 +197,10 @@ router.post("/logout", async (req, res) => {
 router.get("/me", async (req, res) => {
   try {
     const rawToken = req.cookies?.admin_session;
-    if (!rawToken) {
-      return res.status(401).json({ error: "not_authenticated", message: "غير مصادق" });
-    }
+    if (!rawToken) return res.status(401).json({ error: "not_authenticated", message: "غير مصادق" });
 
     const storedToken = hashToken(rawToken);
-    const sessions = await db
-      .select()
-      .from(adminSessionsTable)
-      .where(eq(adminSessionsTable.sessionToken, storedToken));
-
+    const sessions = await db.select().from(adminSessionsTable).where(eq(adminSessionsTable.sessionToken, storedToken));
     const session = sessions[0];
 
     if (!session || session.expiresAt < new Date()) {
@@ -197,8 +208,10 @@ router.get("/me", async (req, res) => {
       return res.status(401).json({ error: "session_expired", message: "انتهت الجلسة" });
     }
 
-    const username = process.env.ADMIN_USERNAME || "ahmed";
-    return res.json({ authenticated: true, username });
+    const config = await getOrSeedAdminConfig();
+    const username = safeDecrypt(config.username);
+    const displayName = config.displayName ? safeDecrypt(config.displayName) : username;
+    return res.json({ authenticated: true, username, displayName });
   } catch (err) {
     console.error("Auth me error:", err);
     return res.status(500).json({ error: "server_error", message: "خطأ في الخادم" });

@@ -1,0 +1,219 @@
+===========================================================
+ FULL PROJECT REBUILD PROMPT — READ ENTIRELY BEFORE CODING
+===========================================================
+
+You are building (or refactoring) a full-stack web application on Replit.
+Implement EVERY requirement below completely and correctly in ONE pass.
+Do NOT leave placeholders, TODOs, or partial implementations.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECTION 1 — ENCRYPTION ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Rules:
+- ALL sensitive fields (names, usernames, emails, message content,
+  security question answers) MUST be encrypted at rest in the database.
+- Encryption algorithm: AES-256-GCM using a server-side secret key
+  stored in environment variable ENCRYPTION_KEY (32-byte hex string).
+- Decryption MUST happen server-side before sending data to the client.
+- The frontend ALWAYS receives and displays plain-text values.
+- NEVER store or display raw encrypted strings on any UI page.
+- NEVER encrypt on the client side.
+- Passwords MUST be hashed using bcrypt (saltRounds = 12) — NOT encrypted.
+- Each encrypted field stores: { iv, authTag, ciphertext } as a JSON
+  string in a single DB column (TEXT type).
+
+Helper module (create once, import everywhere):
+  - encrypt(plainText): returns JSON string
+  - decrypt(jsonString): returns plain text
+  - All DB reads → decrypt → use; All DB writes → encrypt → store.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECTION 2 — ADMIN PROFILE MANAGEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The admin must be able to update ALL of the following from a settings page:
+  1. Display name / username
+  2. Password (requires current password confirmation + bcrypt re-hash)
+  3. Security question 1 + answer 1
+  4. Security question 2 + answer 2
+  5. Security question 3 + answer 3 (optional third)
+
+Rules:
+- All fields above (except password hash) are stored encrypted in DB.
+- Security answers are stored as bcrypt hashes (treat like passwords).
+- On update, validate input, re-encrypt/re-hash, save atomically.
+- Show success/error feedback toast after each save.
+- Session is invalidated and admin is prompted to re-login after
+  password change.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECTION 3 — MOBILE-FIRST RESPONSIVE DESIGN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Apply a complete mobile-first redesign across ALL pages:
+
+Breakpoints:
+  - Base (mobile):  320px – 480px  ← design starts here
+  - Tablet:         481px – 768px
+  - Desktop:        769px+
+
+Requirements:
+  ✔ Zero horizontal scroll or overflow on any screen size.
+  ✔ All layouts use CSS Flexbox or Grid with proper wrapping.
+  ✔ Font sizes: body min 14px mobile, scale up with clamp().
+  ✔ All tap targets (buttons, links, inputs) minimum 44×44px.
+  ✔ Padding/margin scaled down on mobile (use rem, not px).
+  ✔ Cards, containers, images: fluid width (max-width + 100%).
+  ✔ Forms and modals: full-width on mobile, centered on desktop.
+  ✔ Navigation: hamburger/collapsible menu on screens < 768px.
+  ✔ No element overflows its parent container on any viewport.
+  ✔ Desktop layout must remain intact and unchanged.
+  ✔ Test mentally for: iPhone SE (375px), iPhone 14 (390px),
+    Samsung Galaxy (360px), iPad (768px).
+
+CSS strategy:
+  - Write all base styles for mobile first.
+  - Use min-width media queries to progressively enhance for larger screens.
+  - Use CSS custom properties (variables) for spacing and font scales.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECTION 4 — PROGRESSIVE WEB APP (PWA)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Make the entire site installable as a PWA:
+
+4.1 — Web App Manifest (manifest.json):
+  - name, short_name, description
+  - start_url: "/"
+  - display: "standalone"
+  - background_color, theme_color (match site brand)
+  - icons: provide at least 192×192 and 512×512 PNG icons
+  - orientation: "portrait"
+  - Link manifest in all HTML <head> sections.
+
+4.2 — Service Worker (sw.js at root):
+  - Cache strategy: Cache-First for static assets,
+    Network-First for API calls.
+  - Pre-cache: HTML shell, CSS, JS bundles, icons, fonts.
+  - Handle fetch events to serve cached content offline.
+  - Register service worker in main JS entry point with
+    update-on-reload support.
+
+4.3 — Push Notifications (Web Push API):
+  - Generate VAPID key pair (store public key in env VAPID_PUBLIC_KEY,
+    private key in VAPID_PRIVATE_KEY).
+  - On first login, prompt user to allow notifications.
+  - Save PushSubscription object to DB linked to user/admin account.
+  - Trigger push notifications server-side using the `web-push` npm
+    library for these events:
+      a) New chat message received.
+      b) Sent message has been READ by the other party.
+      c) Someone replied to a message.
+  - Notification payload: { title, body, icon, url (deep link) }.
+  - Service worker `push` event handler: show notification with
+    actions ["Open", "Dismiss"] using self.registration.showNotification().
+  - Clicking notification opens the relevant chat/message in the app.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECTION 5 — SCHEDULED / TIME-LOCKED MESSAGES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Allow any message to be scheduled to "unlock" at a future date/time,
+up to years in the future.
+
+5.1 — Database fields (add to messages table):
+  - scheduled_unlock_at  DATETIME  (nullable — null = available immediately)
+  - is_unlocked          BOOLEAN   DEFAULT false
+  - unlock_notified      BOOLEAN   DEFAULT false
+
+5.2 — Composing a scheduled message:
+  - In the message compose UI, add a "Schedule unlock" toggle.
+  - When enabled, show a date+time picker (datetime-local input).
+  - Minimum selectable date: now + 1 minute.
+  - Maximum: no limit (years ahead allowed).
+  - Display human-readable summary: "This message unlocks on March 15, 2026 at 9:00 AM".
+  - Store scheduled_unlock_at encrypted in DB.
+  - Message content itself is also encrypted as per Section 1.
+
+5.3 — Unlock logic (server-side scheduler):
+  - Run a background job every 60 seconds using setInterval or
+    node-cron (cron: "* * * * *").
+  - Query all messages where:
+      scheduled_unlock_at <= NOW()
+      AND is_unlocked = false
+  - For each found message:
+      a) Set is_unlocked = true.
+      b) If recipient has a push subscription and unlock_notified = false:
+           Send push notification: "🔓 A scheduled message has unlocked for you!"
+           Set unlock_notified = true.
+
+5.4 — Reading/displaying messages:
+  - If is_unlocked = false AND scheduled_unlock_at > NOW():
+      → Show a locked card UI with a countdown timer and lock icon.
+      → Do NOT reveal message content, sender details, or any metadata.
+      → Show only: "This message unlocks in X days, Y hours, Z minutes."
+      → Animate countdown in real-time using JS setInterval (every second).
+  - If is_unlocked = true OR scheduled_unlock_at IS NULL:
+      → Show full decrypted message content normally.
+
+5.5 — Countdown UI component:
+  - Flip-clock or segmented countdown display (days : hours : mins : secs).
+  - Mobile-friendly, centered, visually prominent.
+  - Lock icon (🔒) displayed above countdown.
+  - Smooth transition animation when message unlocks while user is watching.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ SECTION 6 — GENERAL TECHNICAL REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Stack (use what is already set up, fill gaps with):
+  - Backend: Node.js + Express (or existing framework)
+  - Database: SQLite (better-sqlite3) or PostgreSQL
+  - Auth: express-session with secure, httpOnly cookies
+  - Templating: EJS / plain HTML or existing setup
+
+Environment variables required (.env):
+  ENCRYPTION_KEY=<32-byte hex>
+  SESSION_SECRET=<random 64-char string>
+  VAPID_PUBLIC_KEY=<generated>
+  VAPID_PRIVATE_KEY=<generated>
+
+Security checklist:
+  ✔ All user inputs sanitized and validated server-side.
+  ✔ CSRF protection on all POST/PUT/DELETE routes.
+  ✔ Rate limiting on login and sensitive endpoints.
+  ✔ Sessions expire after inactivity (30 min default).
+  ✔ HTTPS enforced in production (trust proxy if behind Replit proxy).
+  ✔ No sensitive data logged to console in production.
+
+Code quality:
+  ✔ Modular structure: separate files for routes, controllers, helpers.
+  ✔ All async operations use try/catch with meaningful error messages.
+  ✔ Database queries use parameterized statements (no SQL injection).
+  ✔ Consistent code style throughout.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ DELIVERY CHECKLIST — DO NOT FINISH UNTIL ALL ARE DONE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ [ ] AES-256-GCM encryption helper created and used everywhere
+ [ ] All sensitive DB fields encrypted; passwords bcrypt-hashed
+ [ ] Frontend always shows decrypted plain text
+ [ ] Admin can update username, password, security Q&A
+ [ ] All pages pass mobile-first responsive layout (320px+)
+ [ ] No horizontal scroll on any viewport
+ [ ] All tap targets ≥ 44px
+ [ ] manifest.json created and linked
+ [ ] sw.js service worker registered and caching correctly
+ [ ] VAPID keys generated, web-push installed
+ [ ] Push notifications fire for: new message / read / reply
+ [ ] Scheduled message field in DB with unlock logic
+ [ ] Background job checks and unlocks messages every 60s
+ [ ] Locked message shows countdown timer, not content
+ [ ] Push notification sent when scheduled message unlocks
+ [ ] All .env variables documented in README or .env.example
+
+===========================================================
+ START IMPLEMENTING NOW. DO NOT ASK CLARIFYING QUESTIONS.
+===========================================================

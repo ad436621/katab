@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { lettersTable, questionsTable, repliesTable } from "@workspace/db/schema";
-import { eq, desc, like, and, SQL } from "drizzle-orm";
+import { eq, desc, and, SQL } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
 import { encrypt, safeDecrypt } from "../crypto.js";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
+import { sendPushToAdmins } from "./push.js";
 
 const router = Router();
 
@@ -23,6 +24,8 @@ function formatLetter(letter: any) {
     readAt: letter.readAt ? letter.readAt.toISOString() : null,
     language: letter.language,
     status: letter.status,
+    scheduledUnlockAt: letter.scheduledUnlockAt ? letter.scheduledUnlockAt.toISOString() : null,
+    isUnlocked: letter.isUnlocked ?? false,
     createdAt: letter.createdAt.toISOString(),
     updatedAt: letter.updatedAt.toISOString(),
   };
@@ -71,7 +74,7 @@ router.get("/", requireAdmin, async (req, res) => {
 
 router.post("/", requireAdmin, async (req, res) => {
   try {
-    const { title, body, recipientName, language = "arabic", status = "draft", questions = [] } = req.body;
+    const { title, body, recipientName, language = "arabic", status = "draft", questions = [], scheduledUnlockAt } = req.body;
 
     if (!title || !body || !recipientName) {
       return res.status(400).json({ error: "missing_fields", message: "العنوان والمحتوى واسم المستلم مطلوبة" });
@@ -79,6 +82,7 @@ router.post("/", requireAdmin, async (req, res) => {
 
     const uniqueToken = generateToken();
     const now = new Date();
+    const parsedSchedule = scheduledUnlockAt ? new Date(scheduledUnlockAt) : null;
 
     const [letter] = await db.insert(lettersTable).values({
       title: encrypt(title),
@@ -87,6 +91,8 @@ router.post("/", requireAdmin, async (req, res) => {
       uniqueToken,
       language,
       status,
+      scheduledUnlockAt: parsedSchedule,
+      isUnlocked: !parsedSchedule,
       createdAt: now,
       updatedAt: now,
     }).returning();
@@ -156,7 +162,7 @@ router.get("/:id", requireAdmin, async (req, res) => {
 router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, body, recipientName, language, status, questions } = req.body;
+    const { title, body, recipientName, language, status, questions, scheduledUnlockAt } = req.body;
 
     const existing = await db.select().from(lettersTable).where(eq(lettersTable.id, id));
     if (!existing[0]) {
@@ -169,6 +175,12 @@ router.put("/:id", requireAdmin, async (req, res) => {
     if (recipientName !== undefined) updateData.recipientName = encrypt(recipientName);
     if (language !== undefined) updateData.language = language;
     if (status !== undefined) updateData.status = status;
+    if (scheduledUnlockAt !== undefined) {
+      const parsedSchedule = scheduledUnlockAt ? new Date(scheduledUnlockAt) : null;
+      updateData.scheduledUnlockAt = parsedSchedule;
+      updateData.isUnlocked = !parsedSchedule;
+      updateData.unlockNotified = false;
+    }
 
     const [updated] = await db
       .update(lettersTable)
@@ -261,6 +273,13 @@ router.post("/:id/admin-reply", requireAdmin, async (req, res) => {
     }).returning();
 
     const adminName = process.env.ADMIN_USERNAME || "ahmed";
+
+    const letterData = existing[0];
+    sendPushToToken(letterData.uniqueToken, {
+      title: "💬 رد جديد على رسالتك",
+      body: `تلقيت رداً جديداً`,
+      url: `/letter/${letterData.uniqueToken}`,
+    }).catch(() => {});
 
     return res.status(201).json({
       reply: {

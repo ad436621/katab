@@ -9,6 +9,7 @@ import Dashboard from "@/pages/Dashboard";
 import Compose from "@/pages/Compose";
 import LetterView from "@/pages/LetterView";
 import LetterDetail from "@/pages/LetterDetail";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/compose" component={Compose} />
       <Route path="/compose/:id" component={Compose} />
       <Route path="/letters/:id" component={LetterDetail} />
+      <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
   );

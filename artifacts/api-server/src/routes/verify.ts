@@ -4,10 +4,10 @@ import { lettersTable, questionsTable, repliesTable } from "@workspace/db/schema
 import { eq } from "drizzle-orm";
 import { safeDecrypt } from "../crypto.js";
 import * as bcrypt from "bcryptjs";
+import { sendPushToAdmins } from "./push.js";
 
 const router = Router();
 
-// Rate limit unlock attempts per token
 const unlockAttempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_UNLOCK = 10;
 const WINDOW_MS = 30 * 60 * 1000;
@@ -17,7 +17,7 @@ function checkUnlockLimit(token: string): boolean {
   const record = unlockAttempts.get(token);
   if (!record || now > record.resetAt) {
     unlockAttempts.set(token, { count: 1, resetAt: now + WINDOW_MS });
-    return true; // allowed
+    return true;
   }
   if (record.count >= MAX_UNLOCK) return false;
   record.count++;
@@ -28,20 +28,14 @@ router.get("/:token", async (req, res) => {
   try {
     const { token } = req.params;
 
-    const letters = await db
-      .select()
-      .from(lettersTable)
-      .where(eq(lettersTable.uniqueToken, token));
-
+    const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
     const letter = letters[0];
 
-    if (!letter) {
-      return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
-    }
+    if (!letter) return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
+    if (letter.status === "draft") return res.status(403).json({ error: "not_sent", message: "هذه الرسالة لم ترسل بعد" });
 
-    if (letter.status === "draft") {
-      return res.status(403).json({ error: "not_sent", message: "هذه الرسالة لم ترسل بعد" });
-    }
+    const now = new Date();
+    const isScheduledLocked = letter.scheduledUnlockAt && !letter.isUnlocked && letter.scheduledUnlockAt > now;
 
     const questions = await db
       .select()
@@ -54,7 +48,10 @@ router.get("/:token", async (req, res) => {
       recipientName: safeDecrypt(letter.recipientName),
       language: letter.language,
       status: letter.status,
-      questions: questions.map(q => ({
+      scheduledUnlockAt: letter.scheduledUnlockAt ? letter.scheduledUnlockAt.toISOString() : null,
+      isUnlocked: letter.isUnlocked,
+      isScheduledLocked: !!isScheduledLocked,
+      questions: isScheduledLocked ? [] : questions.map(q => ({
         id: q.id,
         questionText: safeDecrypt(q.questionText),
         orderIndex: q.orderIndex,
@@ -79,19 +76,19 @@ router.post("/:token/unlock", async (req, res) => {
       return res.status(400).json({ error: "missing_answers", message: "الإجابات مطلوبة" });
     }
 
-    const letters = await db
-      .select()
-      .from(lettersTable)
-      .where(eq(lettersTable.uniqueToken, token));
-
+    const letters = await db.select().from(lettersTable).where(eq(lettersTable.uniqueToken, token));
     const letter = letters[0];
 
-    if (!letter) {
-      return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
-    }
+    if (!letter) return res.status(404).json({ error: "not_found", message: "الرسالة غير موجودة" });
+    if (letter.status === "draft") return res.status(403).json({ error: "not_sent", message: "هذه الرسالة لم ترسل بعد" });
 
-    if (letter.status === "draft") {
-      return res.status(403).json({ error: "not_sent", message: "هذه الرسالة لم ترسل بعد" });
+    const now = new Date();
+    if (letter.scheduledUnlockAt && !letter.isUnlocked && letter.scheduledUnlockAt > now) {
+      return res.status(423).json({
+        error: "message_locked",
+        message: "هذه الرسالة مقفلة حتى " + letter.scheduledUnlockAt.toISOString(),
+        scheduledUnlockAt: letter.scheduledUnlockAt.toISOString(),
+      });
     }
 
     const questions = await db
@@ -105,37 +102,32 @@ router.post("/:token/unlock", async (req, res) => {
         const question = questions[i];
         const userAnswer = answers.find((a: any) => a.questionId === question.id);
         if (!userAnswer) {
-          return res.status(403).json({
-            error: "wrong_answers",
-            failedIndex: i,
-            message: `إجابة السؤال ${i + 1} غير موجودة`,
-          });
+          return res.status(403).json({ error: "wrong_answers", failedIndex: i, message: `إجابة السؤال ${i + 1} غير موجودة` });
         }
         const normalizedInput = userAnswer.answer?.toLowerCase().trim() || "";
         const storedHash = question.answerText;
-
         let match = false;
         if (storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$")) {
           match = await bcrypt.compare(normalizedInput, storedHash);
         } else {
           match = normalizedInput === storedHash;
         }
-
         if (!match) {
-          return res.status(403).json({
-            error: "wrong_answers",
-            failedIndex: i,
-            message: `إجابة السؤال ${i + 1} غير صحيحة`,
-          });
+          return res.status(403).json({ error: "wrong_answers", failedIndex: i, message: `إجابة السؤال ${i + 1} غير صحيحة` });
         }
       }
     }
 
+    const wasRead = letter.isRead;
+
     if (!letter.isRead) {
-      await db
-        .update(lettersTable)
-        .set({ isRead: true, readAt: new Date(), status: "read", updatedAt: new Date() })
-        .where(eq(lettersTable.id, letter.id));
+      await db.update(lettersTable).set({ isRead: true, readAt: now, status: "read", updatedAt: now }).where(eq(lettersTable.id, letter.id));
+
+      sendPushToAdmins({
+        title: "✉️ تمت قراءة رسالة",
+        body: `قرأ المستلم رسالة: ${safeDecrypt(letter.title)}`,
+        url: `/letters/${letter.id}`,
+      }).catch(() => {});
     }
 
     const replies = await db
@@ -151,7 +143,7 @@ router.post("/:token/unlock", async (req, res) => {
         recipientName: safeDecrypt(letter.recipientName),
         uniqueToken: letter.uniqueToken,
         isRead: true,
-        readAt: new Date().toISOString(),
+        readAt: wasRead ? letter.readAt?.toISOString() : now.toISOString(),
         language: letter.language,
         status: "read",
         createdAt: letter.createdAt.toISOString(),
