@@ -6,7 +6,7 @@ import { requireAdmin } from "../middleware/adminAuth.js";
 import { encrypt, safeDecrypt } from "../crypto.js";
 import * as crypto from "crypto";
 import * as bcrypt from "bcryptjs";
-import { sendPushToAdmins } from "./push.js";
+import { sendToAdmin, sendToLetter } from "../services/push.service.js";
 
 const router = Router();
 
@@ -275,7 +275,8 @@ router.post("/:id/admin-reply", requireAdmin, async (req, res) => {
     const adminName = process.env.ADMIN_USERNAME || "ahmed";
 
     const letterData = existing[0];
-    sendPushToToken(letterData.uniqueToken, {
+    sendToLetter(letterData.uniqueToken, {
+      type: "new_reply",
       title: "💬 رد جديد على رسالتك",
       body: `تلقيت رداً جديداً`,
       url: `/letter/${letterData.uniqueToken}`,

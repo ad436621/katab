@@ -1,15 +1,19 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { PenLine, Inbox, LogOut, Loader2, ShieldCheck, Settings, Menu, X } from "lucide-react";
+import { PenLine, Inbox, LogOut, Loader2, ShieldCheck, Settings, Menu, X, Smartphone } from "lucide-react";
 import { useGetAuthMe, useAdminLogout } from "@workspace/api-client-react";
 import { useEffect, useState } from "react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { getPWAInstallPrompt, clearPWAInstallPrompt } from "@/main";
+import { toast } from "sonner";
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const { data: auth, isLoading, isError } = useGetAuthMe();
   const logoutMutation = useAdminLogout();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [showNotifBanner, setShowNotifBanner] = useState(false);
 
   useEffect(() => {
     if (!isLoading && (isError || !auth?.authenticated)) {
@@ -17,9 +21,65 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, isError, auth, setLocation]);
 
+  useEffect(() => { setSidebarOpen(false); }, [location]);
+
+  // PWA install banner logic
   useEffect(() => {
-    setSidebarOpen(false);
-  }, [location]);
+    const dismissed = localStorage.getItem("pwa_install_dismissed");
+    if (dismissed) return;
+    if (getPWAInstallPrompt()) { setShowInstallBanner(true); return; }
+    const handler = () => setShowInstallBanner(true);
+    window.addEventListener("pwa-install-available", handler);
+    const installed = () => { setShowInstallBanner(false); toast.success("تم تثبيت التطبيق!"); };
+    window.addEventListener("pwa-installed", installed);
+    return () => {
+      window.removeEventListener("pwa-install-available", handler);
+      window.removeEventListener("pwa-installed", installed);
+    };
+  }, []);
+
+  // Push notification permission banner
+  useEffect(() => {
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+    const dismissCount = parseInt(localStorage.getItem("push_dismissed") || "0", 10);
+    if (Notification.permission === "default" && dismissCount < 2) {
+      // Delay 3s to not be intrusive
+      const t = setTimeout(() => setShowNotifBanner(true), 3000);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const handleInstall = async () => {
+    const prompt = getPWAInstallPrompt() as any;
+    if (!prompt) return;
+    prompt.prompt();
+    const { outcome } = await prompt.userChoice;
+    clearPWAInstallPrompt();
+    setShowInstallBanner(false);
+    if (outcome === "accepted") toast.success("جاري تثبيت التطبيق...");
+  };
+
+  const dismissInstall = () => {
+    localStorage.setItem("pwa_install_dismissed", "1");
+    setShowInstallBanner(false);
+  };
+
+  const dismissNotifBanner = () => {
+    const count = parseInt(localStorage.getItem("push_dismissed") || "0", 10);
+    localStorage.setItem("push_dismissed", String(count + 1));
+    setShowNotifBanner(false);
+  };
+
+  const enableNotifications = async () => {
+    setShowNotifBanner(false);
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      toast.success("تم تفعيل الإشعارات! افتح الإعدادات للمتابعة");
+      setLocation("/settings");
+    } else {
+      toast.error("لم يتم منح إذن الإشعارات");
+    }
+  };
 
   if (isLoading) {
     return (
@@ -107,10 +167,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-muted/30 flex" dir="rtl">
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-20 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/40 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       <Sidebar />
@@ -126,8 +183,39 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           <h2 className="font-display text-lg md:text-xl text-foreground truncate flex-1">
             {getTitle()}
           </h2>
+
+          {showInstallBanner && (
+            <div className="hidden sm:flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-xl px-3 py-1.5 shrink-0">
+              <Smartphone className="w-4 h-4 text-primary" />
+              <button onClick={handleInstall} className="text-xs font-semibold text-primary hover:underline">
+                تثبيت التطبيق
+              </button>
+              <button onClick={dismissInstall} className="text-muted-foreground hover:text-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <NotificationBell />
         </header>
+
+        {showNotifBanner && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center gap-3">
+            <span className="text-sm text-amber-800 flex-1">
+              🔔 فعّل الإشعارات لتعلم فوراً عند رد المستلمين
+            </span>
+            <button
+              onClick={enableNotifications}
+              className="text-xs bg-amber-700 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-amber-800 transition-colors shrink-0 min-h-[32px]"
+            >
+              تفعيل
+            </button>
+            <button onClick={dismissNotifBanner} className="text-amber-600 hover:text-amber-800 shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto p-4 md:p-8 relative">
           <div className="max-w-5xl mx-auto">
             {children}

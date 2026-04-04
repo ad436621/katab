@@ -1,0 +1,663 @@
+===========================================================
+ ROYAL LETTERS — MEGA UPGRADE PROMPT v3
+ Complete the current implementation first, then add everything below.
+ Read the ENTIRE codebase before writing a single line of code.
+ Implement phases IN ORDER. Each phase is self-contained.
+===========================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PRE-FLIGHT — FINISH WHAT'S IN PROGRESS RIGHT NOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The codebase is mid-implementation. Before anything else,
+complete EXACTLY what was in progress:
+
+1. Finish updating AdminLayout to include the NotificationBell
+   component in the header (top-right, with unread badge).
+
+2. Update App.tsx to use Sonner <Toaster /> — remove any
+   duplicate toast provider. Import toast from 'sonner' in
+   ALL components that currently use a different toast system.
+   Standardize: every mutation uses sonner toast.
+
+3. Finish the Dashboard rewrite:
+   - 6 status badges (Draft/Sent/Read/Replied/Scheduled/Locked)
+   - Stats bar: 4 cards (Total / Unread / Replied / Scheduled)
+   - Filter by status + sort dropdown (client-side, no extra API)
+   - Copy link button with 2-second "Copied!" tooltip
+   - Inline delete confirmation component (no window.confirm)
+
+4. Finish the Compose page rewrite:
+   - Live character count (normal → amber at 5k → red at 10k)
+   - Recipient name autocomplete from GET /api/letters/recipient-suggestions
+   - Dynamic human-readable scheduled unlock summary in gold text
+
+5. Finish the Settings page — make sure it uses Sonner toasts
+   for all save/error feedback.
+
+Verify every item above compiles and works before Phase 1.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 1 — PWA: WHATSAPP-GRADE PUSH NOTIFICATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The goal is push notifications that behave exactly like
+WhatsApp: they arrive instantly, show rich content, have
+action buttons, play a sound, badge the app icon, and
+open the right screen when tapped.
+
+── 1A. SERVICE WORKER REWRITE (public/sw.js) ─────────────
+
+Replace the existing service worker with a production-grade
+implementation:
+
+INSTALL event:
+  Pre-cache the app shell:
+    '/', '/index.html', '/manifest.json',
+    all hashed JS/CSS bundles (use self.__WB_MANIFEST if using
+    workbox, otherwise hardcode the shell files),
+    notification sound file '/sounds/notify.mp3',
+    offline fallback page '/offline.html'
+  self.skipWaiting() to activate immediately.
+
+ACTIVATE event:
+  clients.claim() to take control of all open tabs.
+  Delete old caches from previous versions.
+
+FETCH event:
+  - API calls (/api/*): Network-first, fall back to a cached
+    JSON error response if offline.
+  - Static assets (JS/CSS/images): Cache-first.
+  - HTML navigation requests: Network-first, fall back to
+    cached '/index.html', then to '/offline.html'.
+
+PUSH event (WhatsApp-style):
+  Parse the push payload JSON:
+    { type, title, body, icon, badge, tag, url,
+      recipientName, letterId, sound, vibrate }
+
+  Show notification with:
+    title, body, icon: '/icons/icon-192.png',
+    badge: '/icons/badge-72.png' (monochrome icon for status bar),
+    tag: use letterId or type as tag (collapses duplicates),
+    renotify: true (always show even if same tag),
+    requireInteraction: true for type 'new_reply'
+      (stays until dismissed, like WhatsApp messages),
+    silent: false,
+    vibrate: [200, 100, 200] (double-pulse like WhatsApp),
+    data: { url, letterId, type },
+    actions:
+      For type 'new_reply':
+        [ { action: 'open', title: '📖 Open Letter' },
+          { action: 'dismiss', title: '✕ Dismiss' } ]
+      For type 'letter_read':
+        [ { action: 'open', title: '👁 View Letter' } ]
+      For type 'message_unlocked':
+        [ { action: 'open', title: '🔓 Open Now' },
+          { action: 'dismiss', title: 'Later' } ]
+
+NOTIFICATIONCLICK event:
+  event.notification.close()
+  If action === 'dismiss': return.
+  If action === 'open' or default click:
+    const url = event.notification.data.url
+    Focus existing open window at that URL if one exists,
+    otherwise open a new window: clients.openWindow(url)
+
+NOTIFICATIONCLOSE event:
+  Track dismissals — POST /api/notifications/dismissed with
+  the notification tag so the server knows it was seen.
+
+MESSAGE event (from main thread):
+  Handle { type: 'SKIP_WAITING' } → self.skipWaiting()
+  Handle { type: 'BADGE_COUNT', count } →
+    if (navigator.setAppBadge) navigator.setAppBadge(count)
+  Handle { type: 'CLEAR_BADGE' } →
+    if (navigator.clearAppBadge) navigator.clearAppBadge()
+
+── 1B. APP BADGE (like WhatsApp unread count) ────────────
+
+Whenever the unread notification count changes:
+  Send a message to the service worker:
+    navigator.serviceWorker.controller.postMessage({
+      type: 'BADGE_COUNT', count: unreadCount
+    })
+  This sets the number badge on the app icon on Android/desktop.
+  Clear the badge when the admin opens the notifications panel.
+
+── 1C. NOTIFICATION SOUND ────────────────────────────────
+
+Create a short (< 1 second) notification sound file and
+place it at public/sounds/notify.mp3
+
+When a push notification arrives AND the user has the app
+open (document.visibilityState === 'visible'):
+  Play the sound via the Audio API as a supplement since the
+  OS won't play it when the app is focused:
+    new Audio('/sounds/notify.mp3').play()
+  Also show an in-app toast with the notification content.
+
+── 1D. PUSH SUBSCRIPTION LIFECYCLE ──────────────────────
+
+On admin login (after successful auth):
+  1. Check if push is supported: 'PushManager' in window
+  2. Check current permission: Notification.permission
+  3. If 'granted': silently re-subscribe and sync to server
+  4. If 'default': show a non-intrusive banner at the top of
+     the dashboard (NOT a browser popup immediately):
+       "🔔 Enable notifications to know when recipients reply"
+       [ Enable Notifications ] [ Not now ]
+     Store 'push_dismissed' in localStorage — never show again
+     if the admin clicked "Not now" more than twice.
+  5. If 'denied': show a small settings link:
+       "Notifications blocked — enable in browser settings"
+
+On subscription, POST /api/push/subscribe with:
+  { endpoint, keys: { p256dh, auth }, isAdmin: true }
+
+Handle subscription expiry:
+  In the service worker pushsubscriptionchange event,
+  auto-resubscribe and POST the new subscription to the server.
+
+── 1E. BACKEND PUSH NOTIFICATION SERVICE ─────────────────
+
+Create artifacts/api-server/src/services/push.service.ts:
+
+  import webpush from 'web-push'
+
+  interface NotificationPayload {
+    type: 'new_reply' | 'letter_read' | 'message_unlocked' | 'new_letter'
+    title: string
+    body: string
+    url: string
+    letterId?: number
+    recipientName?: string
+    tag?: string
+  }
+
+  async function sendToAdmin(payload: NotificationPayload): Promise<void>
+    // Fetch all isAdmin=true subscriptions from DB
+    // Call webpush.sendNotification() for each
+    // On HTTP 410 Gone: delete that subscription from DB (expired)
+    // On HTTP 429: log and skip (rate limited)
+    // Never throw — catch all errors per subscription
+
+  async function sendToLetter(token: string, payload): Promise<void>
+    // Fetch subscription where letterToken = token
+    // Same error handling as above
+
+  export const pushService = { sendToAdmin, sendToLetter }
+
+Use pushService everywhere notifications are sent.
+Call sendToAdmin for:
+  - New reply from recipient
+  - Letter read by recipient
+  - Any scheduled message unlocked
+
+── 1F. OFFLINE PAGE ──────────────────────────────────────
+
+Create public/offline.html — a beautiful styled page matching
+the site theme (parchment background, gold text, Arabic font)
+that says:
+  "أنت غير متصل بالإنترنت"
+  "You are currently offline"
+  "Please check your connection and try again."
+  A retry button that calls window.location.reload()
+
+── 1G. PWA INSTALL PROMPT ────────────────────────────────
+
+Capture the beforeinstallprompt event in main.tsx.
+Store it in a ref. Show a custom install banner in the
+AdminLayout header (between the title and the bell):
+  "📱 Install App" button — only visible if the prompt is available
+  and the user hasn't dismissed it before (check localStorage).
+  Clicking it triggers the native install prompt.
+  On appinstalled event: hide the banner and show a success toast.
+
+── 1H. BADGE ICON (required for PWA badge API) ───────────
+
+Generate a monochrome 72×72 PNG icon at public/icons/badge-72.png
+using ImageMagick or Node canvas. This is a white silhouette
+of an envelope on transparent background for the status bar badge.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 1 CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] sw.js handles install/activate/fetch/push/click/close/message
+ [ ] Notifications have action buttons per type
+ [ ] requireInteraction: true for new_reply notifications
+ [ ] vibrate: [200,100,200] on all notifications
+ [ ] App badge count set/cleared via service worker message
+ [ ] notify.mp3 plays when app is in foreground
+ [ ] In-app toast also shown when app is focused
+ [ ] Push permission banner (non-intrusive) on dashboard
+ [ ] pushsubscriptionchange auto-resubscribes
+ [ ] push.service.ts centralizes all push sending
+ [ ] HTTP 410 subscriptions auto-deleted from DB
+ [ ] offline.html served when network fails
+ [ ] Install prompt captured and shown as custom banner
+ [ ] badge-72.png monochrome icon generated
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 2 — REAL-TIME EXPERIENCE (WebSocket Live Updates)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Replace the 30-second notification polling with real-time
+WebSocket updates so the admin sees events instantly —
+exactly like WhatsApp's online indicator.
+
+── 2A. BACKEND WEBSOCKET SERVER ──────────────────────────
+
+Install: ws (already likely present) or use the built-in
+http server to attach a WebSocket server.
+
+In artifacts/api-server/src/websocket.ts:
+
+  import { WebSocketServer, WebSocket } from 'ws'
+  import { IncomingMessage } from 'http'
+
+  const adminClients = new Set<WebSocket>()
+
+  function setupWebSocket(server: http.Server): void
+    Create WSS attached to the same HTTP server.
+    On connection:
+      Authenticate by reading the session cookie from the
+      upgrade request headers. If no valid session: ws.close(4401).
+      Add to adminClients set.
+      Send immediately: { type: 'connected', timestamp: Date.now() }
+      On close: remove from adminClients.
+      On error: remove from adminClients, log error.
+
+  function broadcastToAdmin(event: object): void
+    Serialize to JSON.
+    For each client in adminClients:
+      if (client.readyState === WebSocket.OPEN) client.send(json)
+
+  export const wsServer = { setup: setupWebSocket, broadcast: broadcastToAdmin }
+
+Call wsServer.broadcast() from every place that currently
+calls pushService.sendToAdmin() so both channels fire.
+
+Event shapes to broadcast:
+  { type: 'new_reply',         letterId, recipientName, preview, timestamp }
+  { type: 'letter_read',       letterId, recipientName, readAt,  timestamp }
+  { type: 'message_unlocked',  letterId, title,                  timestamp }
+  { type: 'notification_count', unread: number }
+
+── 2B. FRONTEND WEBSOCKET HOOK ───────────────────────────
+
+Create src/hooks/useAdminSocket.ts:
+
+  export function useAdminSocket(onEvent: (e: WsEvent) => void) {
+    useEffect(() => {
+      // Connect to ws:// or wss:// same origin
+      const ws = new WebSocket(
+        `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+      )
+      ws.onmessage = (msg) => {
+        const event = JSON.parse(msg.data)
+        onEvent(event)
+      }
+      // Exponential backoff reconnect on close/error
+      // Start at 1s, double each attempt, cap at 30s
+      // Reset backoff on successful open
+      return () => ws.close()
+    }, [])
+  }
+
+Use this hook in AdminLayout so it's active on all admin pages.
+On receiving any event:
+  - Refresh the notification count badge
+  - If type is 'new_reply': show an in-app toast with the
+    preview text and a "View →" link button inside the toast
+  - If type is 'letter_read': show a green toast "Your letter
+    to [name] was just opened ✓"
+  - If type is 'message_unlocked': show a gold toast "🔓
+    Scheduled letter unlocked"
+  - Dispatch a custom window event so individual pages can
+    react (e.g. Dashboard refreshes the letter list)
+
+── 2C. ONLINE/TYPING INDICATORS ──────────────────────────
+
+When a recipient is actively viewing a letter (page is
+visible), send periodic heartbeat pings every 10 seconds:
+  POST /api/verify/:token/heartbeat { action: 'viewing' }
+
+The server:
+  - Updates a viewingAt timestamp on the letter
+  - Broadcasts to admin WebSocket:
+    { type: 'recipient_online', letterId, token, lastSeen }
+
+In the admin's letter detail page (/letters/:id):
+  Show a small indicator below the recipient name:
+    🟢 "Recipient is viewing this letter right now"  (if < 15s ago)
+    🟡 "Recipient was online X minutes ago"          (if < 60 min)
+    (nothing shown if longer ago)
+  Animate the green dot with a CSS pulse animation.
+
+── 2D. MESSAGE READ RECEIPTS (like WhatsApp ✓✓) ──────────
+
+When a letter is read, update the letter row in the
+Dashboard with a read receipt indicator:
+  Single grey check (✓) = sent (delivered to recipient URL)
+  Double grey check (✓✓) = recipient opened the verify page
+  Double gold check (✓✓) = recipient successfully unlocked letter
+
+Store these as three states in the existing letter status
+or add a deliveryStatus field:
+  'sent' | 'delivered' | 'read'
+
+Show the appropriate check icon on each letter in the
+Dashboard card/row, styled exactly like WhatsApp ticks.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 2 CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] WebSocket server on /ws, auth via session cookie
+ [ ] adminClients set managed correctly (add/remove on connect/close)
+ [ ] broadcast() called alongside every push notification
+ [ ] useAdminSocket hook with exponential backoff reconnect
+ [ ] In-app toasts shown on WS events with action links
+ [ ] Recipient heartbeat every 10s while viewing letter
+ [ ] "Recipient is viewing right now" indicator in letter detail
+ [ ] Pulse animation on green dot
+ [ ] Delivery status: sent / delivered / read (✓ / ✓✓ grey / ✓✓ gold)
+ [ ] Dashboard shows correct tick style per letter
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 3 — RICH LETTER EXPERIENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── 3A. RICH TEXT EDITOR IN COMPOSE ───────────────────────
+
+Replace the plain textarea for letter body with a rich text
+editor. Use @tiptap/react (install it):
+  Extensions to enable:
+    Bold, Italic, Underline, TextAlign (right/center/left),
+    Heading (levels 2 and 3 only), BulletList, OrderedList,
+    HardBreak, History (undo/redo), CharacterCount
+
+  Toolbar (compact, touch-friendly — all buttons min 44px):
+    B  I  U  |  H2  H3  |  ≡  ⋮  |  ← center →  |  ↺  ↻
+
+  RTL support: set dir="rtl" on the editor content div.
+  On submit: get editor.getHTML() and store that as the body.
+
+  In LetterView (recipient parchment): render the body as
+  HTML using dangerouslySetInnerHTML — it is safe because
+  the admin wrote it and it was AES encrypted at rest.
+  Apply royal parchment typography CSS to the rendered HTML.
+
+── 3B. MULTIPLE IMAGES PER LETTER ────────────────────────
+
+Upgrade from one image to up to 5 images per letter.
+
+DB change:
+  Add a new table: letter_images
+    id          SERIAL PRIMARY KEY
+    letterId    INTEGER REFERENCES letters(id) ON DELETE CASCADE
+    imageData   TEXT NOT NULL      -- base64
+    imageMime   TEXT NOT NULL
+    imageCaption TEXT             -- AES-256-GCM encrypted
+    orderIndex  INTEGER DEFAULT 0
+    createdAt   TIMESTAMP DEFAULT NOW()
+
+Keep the existing single imageData/imageMime/imageCaption
+columns on the letters table as a migration fallback.
+
+Compose page — image section:
+  Show up to 5 image upload slots in a horizontal scroll
+  strip on mobile, a grid on desktop.
+  Each slot: drag-drop zone or file picker.
+  Images can be reordered by drag-and-drop (use @dnd-kit/core).
+  Each image has its own caption input and a remove (×) button.
+  Compress each image client-side (max 1600px, JPEG 0.82) before
+  converting to base64 — show "Compressing..." per image.
+
+LetterView — image gallery:
+  If the letter has images, show them in a responsive gallery
+  below the body text:
+    1 image: full width, centered
+    2 images: side-by-side on desktop, stacked on mobile
+    3–5 images: masonry-style grid, each clickable to open
+    a full-screen lightbox modal with prev/next navigation,
+    caption display, and pinch-to-zoom on mobile.
+
+── 3C. LETTER REACTIONS ──────────────────────────────────
+
+Add a simple emoji reaction system for recipients.
+
+DB change: add reactionEmoji TEXT (nullable) to letters table.
+
+In LetterView, after the recipient unlocks the letter and
+BEFORE the reply form, show a row of 6 emoji buttons:
+  ❤️  😢  😊  🙏  😮  ✨
+Only one reaction allowed per letter (selecting a new one
+replaces the old one). If already reacted, highlight the
+chosen emoji. Animate with a scale + bounce on selection.
+
+PATCH /api/verify/:token/react { emoji: string }
+  Validates emoji is one of the 6 allowed values.
+  Stores in letters.reactionEmoji.
+  Broadcasts to admin WebSocket: { type: 'reaction', emoji, letterId }
+  Sends push to admin: "💌 [recipientName] reacted with [emoji]"
+
+In admin Dashboard and letter detail: show the reaction emoji
+next to the recipient's name if one exists.
+
+── 3D. LETTER TEMPLATES ──────────────────────────────────
+
+Allow the admin to save and reuse letter templates.
+
+DB: new table letter_templates
+  id           SERIAL PRIMARY KEY
+  name         TEXT NOT NULL   -- AES encrypted, e.g. "Birthday Letter"
+  title        TEXT            -- AES encrypted
+  body         TEXT            -- AES encrypted (HTML from rich text editor)
+  language     TEXT DEFAULT 'ar'
+  questions    JSONB           -- array of {questionText} objects, encrypted
+  createdAt    TIMESTAMP DEFAULT NOW()
+
+Backend routes (admin only):
+  GET    /api/templates         → list all templates (id + name only)
+  POST   /api/templates         → create template from current compose state
+  GET    /api/templates/:id     → get full template (decrypted)
+  DELETE /api/templates/:id     → delete template
+
+Compose page:
+  Add a "Load Template" button at the top of the form.
+  Opens a modal listing saved templates by name.
+  Selecting one populates: title, body, language, questions.
+  Add a "Save as Template" button that opens a small modal
+  to name the template and save it.
+
+── 3E. LETTER EXPIRY ─────────────────────────────────────
+
+Allow the admin to set an expiry date on a letter — after
+which the public verify link shows "This letter has expired"
+instead of the content.
+
+DB: add expiresAt DATETIME (nullable) to letters table.
+
+In Compose, add an "Expiry date" toggle (off by default)
+with a datetime picker. Helper text: "After this date, the
+recipient cannot open the letter."
+
+In GET /api/verify/:token:
+  If expiresAt is set and expiresAt < NOW():
+    Return HTTP 410 Gone: { error: 'expired', expiredAt }
+
+In LetterView:
+  If 410 is received: show a styled "expired" page on the
+  parchment with a sealed envelope icon and the message:
+    "انتهت صلاحية هذه الرسالة"
+    "This letter has expired."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 3 CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] Tiptap rich text editor with full RTL toolbar in Compose
+ [ ] Editor HTML stored and rendered in LetterView safely
+ [ ] letter_images table created and migrated
+ [ ] Up to 5 images with drag-to-reorder in Compose
+ [ ] Lightbox gallery with prev/next and pinch-to-zoom
+ [ ] Client-side image compression per image
+ [ ] 6 emoji reactions with animation in LetterView
+ [ ] PATCH /api/verify/:token/react stores and broadcasts reaction
+ [ ] Reaction shown in Dashboard and letter detail
+ [ ] letter_templates table created and migrated
+ [ ] Template save / load / delete flow in Compose
+ [ ] expiresAt field + 410 response + expired UI page
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 4 — POLISH & PRODUCTION READINESS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── 4A. LETTER PREVIEW MODAL ──────────────────────────────
+
+"Preview" button next to Submit in Compose.
+Full-screen modal — renders the letter exactly as the
+recipient sees it: parchment, royal fonts, rich text body,
+image gallery, wax seal. Read-only. No security questions shown.
+"Close" button fixed at top-right. Full-screen on mobile.
+
+── 4B. AUTO-SAVE COMPOSE DRAFT ───────────────────────────
+
+Auto-save to localStorage debounced 2 seconds after last
+change AND every 30 seconds on a timer. New letters only.
+Save: title, body HTML, recipientName, language, questions,
+  imageCaption(s), scheduledUnlockAt, expiresAt.
+Do NOT save imageData (too large).
+On return to /compose (new): show restore banner with relative
+time. "Restore" | "Discard" buttons.
+Storage key: "royal_letter_draft_v2"
+
+── 4C. SESSION MANAGEMENT IN SETTINGS ────────────────────
+
+In /settings, show:
+  - Session created at (formatted), expires at (formatted)
+  - "Log out all sessions" button → clears admin_sessions → /login
+  - Warning banner on all admin pages if session expires < 30 min:
+    "Your session expires soon — click to extend."
+  POST /api/auth/refresh-session → reset expiry to 7 days.
+
+── 4D. RECIPIENT REPLY IMPROVEMENTS ──────────────────────
+
+Reply textarea: minimum 10 chars to enable submit button.
+Hard limit: 2000 chars. Counter: "1,240 / 2,000".
+After submit: hide form, show thank-you card on parchment
+(Arabic + English based on letter language) with wax seal.
+Persist in sessionStorage so page refresh keeps thank-you state.
+
+── 4E. BEAUTIFUL EMPTY STATES ────────────────────────────
+
+Every list/table that can be empty must show a styled card:
+  Dashboard (no letters):
+    Illustration: a quill and parchment SVG
+    Title: "لم تكتب أي رسائل بعد" / "No letters yet"
+    Button: "✍ Write Your First Letter"
+  Notifications panel (no notifications):
+    Icon: a bell with a Z
+    Text: "All caught up — no new notifications"
+  Templates modal (no templates):
+    Text: "No templates saved yet — save the current letter as a template"
+
+── 4F. KEYBOARD SHORTCUTS ────────────────────────────────
+
+Add global keyboard shortcuts (only active when not in an
+input/textarea):
+  Ctrl/Cmd + N  → navigate to /compose
+  Ctrl/Cmd + D  → navigate to /dashboard
+  Ctrl/Cmd + S  → save the current form (in Compose/Settings)
+  Escape        → close any open modal or dropdown
+
+Show a "Keyboard shortcuts" tooltip in the footer of the
+admin layout listing these. Toggle with "?"
+
+── 4G. PRINT / SHARE LETTER ──────────────────────────────
+
+In the admin letter detail page (/letters/:id), add two
+buttons in the action toolbar:
+
+"Print Letter" — triggers window.print() with a print-
+  specific CSS that hides all UI chrome, shows only the
+  parchment content beautifully formatted for A4 paper.
+
+"Share via WhatsApp" — constructs a WhatsApp share URL:
+  https://wa.me/?text=<encoded message with the letter URL>
+  The message says: "Ahmed sent you a personal letter 📜 [URL]"
+  Opens in a new tab.
+
+"Copy Link" — same as dashboard copy link but in letter detail.
+
+── 4H. ANALYTICS DASHBOARD (admin only) ──────────────────
+
+Add a new /analytics page linked from the sidebar.
+Uses data already in the DB — no external analytics service.
+
+Show these charts using recharts (install if needed):
+  1. Letters over time: a bar chart of letters created per month
+     (last 12 months).
+  2. Response rate: a donut chart of letters with / without replies.
+  3. Read rate: how many sent letters have been read vs unread.
+  4. Average time to read: average hours between sentAt and readAt.
+  5. Scheduled letters: count of currently locked vs unlocked.
+
+All charts are responsive (recharts ResponsiveContainer).
+Gold color scheme matching the site theme.
+On mobile: charts stack vertically, each full width.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ PHASE 4 CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ [ ] Preview modal matches recipient view exactly
+ [ ] Auto-save draft with restore banner
+ [ ] Session info + log-out-all + expiry warning in settings
+ [ ] Reply min/max chars + thank-you card + sessionStorage persist
+ [ ] Beautiful empty states on all lists
+ [ ] Keyboard shortcuts Ctrl+N / Ctrl+D / Ctrl+S / Esc / ?
+ [ ] Print CSS hides chrome, shows parchment cleanly
+ [ ] WhatsApp share URL opens with pre-filled message
+ [ ] /analytics page with 5 recharts charts
+ [ ] All charts responsive and gold-themed
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ CROSS-CUTTING RULES (apply to every phase)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Encryption: Every new TEXT field in the DB that is user
+  content MUST be encrypted with AES-256-GCM using the
+  existing encrypt/decrypt helpers. No exceptions.
+
+Error handling: Every new Express route is wrapped in
+  try/catch and calls next(err) on failure.
+
+Mobile-first: Every new UI component has base styles for
+  320px and scales up. No new horizontal overflow introduced.
+  All new interactive elements min 44px touch target.
+
+Migrations: After every DB schema change, run the Drizzle
+  migration. Never manually alter the DB. Always update the
+  Drizzle schema file in lib/db/ first.
+
+Sonner toasts: ALL user-facing feedback uses sonner toast.
+  No window.alert(). No console.error() shown to users.
+
+TypeScript: No `any` types. Define interfaces for all
+  new API request/response shapes.
+
+No regressions: After implementing each phase, verify that
+  all previously working features still work:
+  login, compose, verify flow, replies, scheduled messages,
+  push subscriptions, image upload, settings page.
+
+===========================================================
+ IMPLEMENTATION ORDER:
+ 1. Finish pre-flight (current in-progress work)
+ 2. Phase 1 (PWA push)
+ 3. Phase 2 (WebSocket)
+ 4. Phase 3 (Rich features)
+ 5. Phase 4 (Polish)
+ Stop after any phase if needed — each is independently valuable.
+ Do NOT ask clarifying questions. Begin with the pre-flight now.
+===========================================================

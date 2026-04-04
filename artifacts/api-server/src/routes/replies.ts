@@ -4,7 +4,8 @@ import { lettersTable, repliesTable, adminNotificationsTable } from "@workspace/
 import { eq, desc } from "drizzle-orm";
 import { requireAdmin } from "../middleware/adminAuth.js";
 import { encrypt, safeDecrypt } from "../crypto.js";
-import { sendPushToAdmins, sendPushToToken } from "./push.js";
+import { sendToAdmin } from "../services/push.service.js";
+import { broadcastToAdmin } from "../websocket.js";
 
 const router = Router();
 
@@ -52,10 +53,12 @@ router.post("/", async (req, res) => {
     const notifMessage = `${replyFrom} أرسل رداً على رسالة: "${letterTitle}"`;
 
     createNotification("new_reply", letter.id, notifMessage);
-    sendPushToAdmins({
+    sendToAdmin({
+      type: "new_reply",
       title: "💬 رد جديد على رسالة",
       body: notifMessage,
       url: `/letters/${letter.id}`,
+      letterId: letter.id,
     }).catch(() => {});
 
     return res.status(201).json({

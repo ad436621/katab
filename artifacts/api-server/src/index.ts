@@ -1,25 +1,21 @@
+import http from "http";
 import app from "./app.js";
 import { db } from "@workspace/db";
 import { lettersTable, adminNotificationsTable } from "@workspace/db/schema";
 import { and, eq, lte, isNotNull } from "drizzle-orm";
-import { sendPushToAdmins, sendPushToToken } from "./routes/push.js";
+import { sendToAdmin, sendToLetter } from "./services/push.service.js";
+import { setupWebSocket, broadcastToAdmin } from "./websocket.js";
 import { encrypt, safeDecrypt } from "./crypto.js";
 
 function validateEnvironment() {
   const errors: string[] = [];
-
   const encKey = process.env.ENCRYPTION_KEY;
-  if (!encKey) {
-    errors.push("ENCRYPTION_KEY is not set");
-  } else if (!/^[0-9a-f]{64}$/i.test(encKey)) {
-    errors.push(`ENCRYPTION_KEY must be exactly 64 hex characters (got ${encKey.length} chars)`);
-  }
-
+  if (!encKey) errors.push("ENCRYPTION_KEY is not set");
+  else if (!/^[0-9a-f]{64}$/i.test(encKey)) errors.push(`ENCRYPTION_KEY must be exactly 64 hex characters (got ${encKey.length} chars)`);
   if (!process.env.DATABASE_URL) errors.push("DATABASE_URL is not set");
   if (!process.env.VAPID_PUBLIC_KEY) errors.push("VAPID_PUBLIC_KEY is not set");
   if (!process.env.VAPID_PRIVATE_KEY) errors.push("VAPID_PRIVATE_KEY is not set");
   if (!process.env.VAPID_EMAIL) errors.push("VAPID_EMAIL is not set");
-
   if (errors.length > 0) {
     console.error("❌ Environment validation failed:");
     errors.forEach(e => console.error(`  • ${e}`));
@@ -35,7 +31,10 @@ if (!rawPort) throw new Error("PORT environment variable is required but was not
 const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${rawPort}"`);
 
-app.listen(port, "0.0.0.0", () => {
+const server = http.createServer(app);
+setupWebSocket(server);
+
+server.listen(port, "0.0.0.0", () => {
   console.log(`Server listening on port ${port}`);
   startScheduler();
 });
@@ -72,16 +71,30 @@ function startScheduler() {
           const title = safeDecrypt(letter.title);
           const notifMsg = `تمت إتاحة الرسالة المجدولة: "${title}"`;
           await createNotification("message_unlocked", letter.id, notifMsg);
-          sendPushToToken(letter.uniqueToken, {
+
+          sendToLetter(letter.uniqueToken, {
+            type: "message_unlocked",
             title: "🔓 رسالتك فُتحت!",
             body: `الرسالة "${title}" متاحة الآن للقراءة`,
             url: `/letter/${letter.uniqueToken}`,
+            letterId: letter.id,
           }).catch(() => {});
-          sendPushToAdmins({
+
+          sendToAdmin({
+            type: "message_unlocked",
             title: "🔓 رسالة مجدولة فُتحت",
             body: notifMsg,
             url: `/letters/${letter.id}`,
+            letterId: letter.id,
           }).catch(() => {});
+
+          broadcastToAdmin({
+            type: "message_unlocked",
+            letterId: letter.id,
+            title: safeDecrypt(letter.title),
+            timestamp: Date.now(),
+          });
+
           await db.update(lettersTable)
             .set({ unlockNotified: true })
             .where(eq(lettersTable.id, letter.id));
@@ -92,3 +105,5 @@ function startScheduler() {
     }
   }, 60 * 1000);
 }
+
+export { broadcastToAdmin };

@@ -4,7 +4,7 @@ import { lettersTable, questionsTable, repliesTable, adminNotificationsTable } f
 import { eq } from "drizzle-orm";
 import { encrypt, safeDecrypt } from "../crypto.js";
 import * as bcrypt from "bcryptjs";
-import { sendPushToAdmins } from "./push.js";
+import { sendToAdmin } from "../services/push.service.js";
 
 const router = Router();
 
@@ -138,10 +138,12 @@ router.post("/:token/unlock", async (req, res) => {
       const letterTitle = safeDecrypt(letter.title);
       const notifMessage = `قرأ المستلم رسالة: "${letterTitle}"`;
       createNotification("letter_read", letter.id, notifMessage);
-      sendPushToAdmins({
+      sendToAdmin({
+        type: "letter_read",
         title: "✉️ تمت قراءة رسالة",
         body: notifMessage,
         url: `/letters/${letter.id}`,
+        letterId: letter.id,
       }).catch(() => {});
     }
 
