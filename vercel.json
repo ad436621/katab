@@ -1,16 +1,15 @@
 {
-  "framework": null,
-  "buildCommand": "pnpm --filter @workspace/royal-letters run build",
-  "outputDirectory": "artifacts/royal-letters/dist/public",
-  "installCommand": "pnpm install",
-  "routes": [
+  "builds": [
     {
-      "src": "/assets/(.*)",
-      "dest": "/assets/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "artifacts/royal-letters/dist/public"
+      }
     }
+  ],
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
