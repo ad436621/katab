@@ -1,5 +1,16 @@
 {
-  "buildCommand": "pnpm install && pnpm --filter @workspace/royal-letters run build",
+  "framework": null,
+  "buildCommand": "pnpm --filter @workspace/royal-letters run build",
   "outputDirectory": "artifacts/royal-letters/dist/public",
-  "installCommand": "pnpm install"
+  "installCommand": "pnpm install",
+  "routes": [
+    {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
 }
